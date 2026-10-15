@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ParcePay - Punto de recarga</title>
+<style>
+:root{--blue:#1257F5;--blue2:#0A3FC4;--sky:#E8F0FF;--ink:#0B1B3A;--mut:#5B6B8C;--line:#D5E1FA;--red:#D6334A;--green:#0E8A5F}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--sky);color:var(--ink);font:16px/1.45 "Poppins",system-ui,-apple-system,"Segoe UI",sans-serif}
+header{background:linear-gradient(160deg,var(--blue),var(--blue2));color:#fff;padding:34px 20px 70px;text-align:center}
+header h1{margin:0;font-size:30px;letter-spacing:-.6px}header h1 b{color:#BFD3FF}
+header p{margin:6px 0 0;opacity:.85}
+main{max-width:440px;margin:-44px auto 40px;padding:0 16px}
+.card{background:#fff;border-radius:22px;padding:22px;box-shadow:0 10px 30px rgba(18,87,245,.15)}
+.tabs{display:flex;background:var(--sky);border-radius:14px;padding:4px;margin-bottom:18px}
+.tabs button{flex:1;border:0;background:none;padding:11px;border-radius:11px;font:inherit;font-weight:600;color:var(--mut);cursor:pointer}
+.tabs button.on{background:#fff;color:var(--blue);box-shadow:0 2px 8px rgba(0,0,0,.08)}
+label{display:block;font-size:14px;color:var(--mut);margin-top:14px}
+input{width:100%;font:inherit;padding:14px;border:1.5px solid var(--line);border-radius:14px;margin-top:6px;color:var(--ink)}
+input:focus{outline:none;border-color:var(--blue)}
+.go{width:100%;margin-top:20px;border:0;border-radius:14px;padding:15px;font:inherit;font-weight:600;background:var(--blue);color:#fff;cursor:pointer}
+.go:disabled{opacity:.6;cursor:default}
+.msg{margin-top:16px;padding:13px 14px;border-radius:14px;font-size:15px;display:none}
+.msg.ok{display:block;background:#E5F7EF;color:var(--green)}
+.msg.err{display:block;background:#FDE8EB;color:var(--red)}
+.hint{color:var(--mut);font-size:13px;text-align:center;margin-top:16px}
+form{display:none}form.on{display:block}
+</style></head>
+<body>
+<header><h1>Parce<b>Pay</b></h1><p>Punto de recarga y cajero</p></header>
+<main><div class="card">
+  <div class="tabs"><button id="t1" class="on" type="button">Meter plata</button><button id="t2" type="button">Sacar plata</button></div>
+
+  <form id="f1" class="on" autocomplete="off">
+    <label for="p1">Celular de la cuenta</label><input id="p1" inputmode="numeric" maxlength="10" placeholder="3001234567">
+    <label for="c1">C&oacute;digo que sale en la app</label><input id="c1" inputmode="numeric" maxlength="6" placeholder="123456">
+    <label for="m1">Monto a meter (COP)</label><input id="m1" inputmode="numeric" maxlength="8" placeholder="50000">
+    <button class="go" type="submit">Meter plata</button>
+  </form>
+
+  <form id="f2" autocomplete="off">
+    <label for="p2">Celular de la cuenta</label><input id="p2" inputmode="numeric" maxlength="10" placeholder="3001234567">
+    <label for="c2">C&oacute;digo que sale en la app</label><input id="c2" inputmode="numeric" maxlength="6" placeholder="123456">
+    <button class="go" type="submit">Entregar dinero</button>
+  </form>
+
+  <div id="msg" class="msg"></div>
+  <div class="hint">En la app toca <b>Meter plata</b> o <b>Sacar</b> para ver tu c&oacute;digo. Dura 10 minutos.</div>
+</div></main>
+<script>
+function $(i){return document.getElementById(i)}
+function peso(v){return "$"+Math.round(v).toLocaleString("es-CO")}
+function say(t,ok){var m=$("msg");m.className="msg "+(ok?"ok":"err");m.textContent=t}
+function tab(n){
+  $("t1").className=n==1?"on":"";$("t2").className=n==2?"on":"";
+  $("f1").className=n==1?"on":"";$("f2").className=n==2?"on":"";
+  $("msg").className="msg";
+}
+$("t1").onclick=function(){tab(1)};$("t2").onclick=function(){tab(2)};
+["p1","c1","m1","p2","c2"].forEach(function(i){$(i).oninput=function(){this.value=this.value.replace(/\D/g,"")}});
+function post(url,body,btn,done){
+  btn.disabled=true;
+  fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+   .then(function(r){return r.json()})
+   .then(function(r){btn.disabled=false;if(r.error)say(r.error,false);else done(r)})
+   .catch(function(){btn.disabled=false;say("No hay conexi\u00f3n con el servidor de ParcePay.",false)});
+}
+$("f1").onsubmit=function(e){
+  e.preventDefault();
+  post("/api/web/deposit",{p:$("p1").value,c:$("c1").value,m:$("m1").value},this.querySelector(".go"),function(r){
+    say("Listo. Se metieron "+peso(r.v)+" a la cuenta de "+r.n+".",true);$("c1").value="";$("m1").value="";
+  });
+};
+$("f2").onsubmit=function(e){
+  e.preventDefault();
+  post("/api/web/withdraw",{p:$("p2").value,c:$("c2").value},this.querySelector(".go"),function(r){
+    say("Entrega "+peso(r.v)+" a "+r.n+".",true);$("c2").value="";
+  });
+};
+</script></body></html>

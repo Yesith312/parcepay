@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: parcepay
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: parcepay-db
+          property: connectionString
+      - key: SECRET
+        generateValue: true
+
+databases:
+  - name: parcepay-db
+    plan: free
+    ipAllowList: []
