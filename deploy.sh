@@ -13,14 +13,16 @@ mkdir -p "$S"
 cp -r "$AQUI/." "$S/"
 rm -rf "$S/build"
 cd "$S"
-if [ ! -d .git ]; then
-  git init -b main
-  git add .
-  git commit -m "ParcePay"
-  gh repo create parcepay --private --source=. --push
-else
-  git add .
-  git commit -m "Actualizacion" || true
-  git push
+[ -d .git ] || git init -b main
+git branch -M main
+git add .
+git commit -m "ParcePay" || true
+if git remote get-url origin >/dev/null 2>&1; then
+  git push -u origin main
+elif ! gh repo create parcepay --private --source=. --remote=origin --push; then
+  # el repositorio ya existia en tu GitHub: lo conectamos
+  U=$(gh api user -q .login)
+  git remote add origin "https://github.com/$U/parcepay.git"
+  git push -u origin main
 fi
 echo "Listo. Repositorio privado: parcepay. Render se actualiza solo."

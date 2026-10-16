@@ -92,6 +92,17 @@ async function tx(fn) {
   catch (e) { try { await c.query("rollback"); } catch (x) {} throw e; }
   finally { c.release(); }
 }
+// Confirma la clave actual (para cambios del perfil)
+async function pinCheck(p, k, ip) {
+  if (locked("l:" + p) || locked("i:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
+  const u = (await pool.query("select salt, hash from users where phone=$1", [p])).rows[0];
+  if (!u) return NOAUTH;
+  const ok = /^\d{4}$/.test(k) && crypto.timingSafeEqual(Buffer.from(hash(k, u.salt)), Buffer.from(u.hash));
+  if (!ok) { fail("l:" + p); fail("i:" + ip); return [400, { error: "Tu clave actual no es correcta." }]; }
+  clear("l:" + p);
+  return null;
+}
+
 const BAD_CODE = [400, { error: "N\u00famero o c\u00f3digo incorrecto, o el c\u00f3digo ya venci\u00f3." }];
 
 // ---------- rutas ----------
@@ -134,6 +145,59 @@ const H = {
     const p = auth(d); if (!p) return NOAUTH;
     const u = await pub(p);
     return u ? [200, { user: u }] : NOAUTH;
+  },
+
+  // ---------- perfil (todos piden la clave actual en d.k) ----------
+  "/api/profile/phone": async (d, ip) => {
+    const p = auth(d); if (!p) return NOAUTH;
+    const np = String(d.v || "");
+    if (!phoneOk(np)) return [400, { error: "Celular inv\u00e1lido" }];
+    if (np === p) return [400, { error: "Ese ya es tu celular." }];
+    const bad = await pinCheck(p, String(d.k || ""), ip); if (bad) return bad;
+    try {
+      // movs.phone apunta a users.phone: se crea la fila nueva, se pasan los movimientos y se borra la vieja
+      await tx(async db => {
+        await db.query("select 1 from users where phone=$1 for update", [p]);
+        await db.query(
+          `insert into users(phone, cc, nombres, apellidos, nacimiento, salt, hash, saldo, created_at)
+           select $2::text, cc, nombres, apellidos, nacimiento, salt, hash, saldo, created_at from users where phone=$1`, [p, np]);
+        await db.query("update movs set phone=$2 where phone=$1", [p, np]);
+        await db.query("delete from codes where phone=$1", [p]);
+        await db.query("delete from users where phone=$1", [p]);
+      });
+    } catch (e) {
+      if (e.code === "23505") return [400, { error: "Ese n\u00famero ya tiene cuenta." }];
+      throw e;
+    }
+    return [200, { user: await pub(np), token: sign(np) }];
+  },
+
+  "/api/profile/cc": async (d, ip) => {
+    const p = auth(d); if (!p) return NOAUTH;
+    const cc = String(d.v || "");
+    if (!/^\d{6,10}$/.test(cc)) return [400, { error: "La c\u00e9dula debe tener entre 6 y 10 n\u00fameros." }];
+    const bad = await pinCheck(p, String(d.k || ""), ip); if (bad) return bad;
+    await pool.query("update users set cc=$2 where phone=$1", [p, hmac("cc:" + cc)]);
+    return [200, { user: await pub(p), token: sign(p) }];
+  },
+
+  "/api/profile/name": async (d, ip) => {
+    const p = auth(d); if (!p) return NOAUTH;
+    const n = String(d.n || "").trim().slice(0, 60), a = String(d.a || "").trim().slice(0, 60);
+    if (!n || !a) return [400, { error: "Escribe tus nombres y apellidos." }];
+    const bad = await pinCheck(p, String(d.k || ""), ip); if (bad) return bad;
+    await pool.query("update users set nombres=$2, apellidos=$3 where phone=$1", [p, n, a]);
+    return [200, { user: await pub(p), token: sign(p) }];
+  },
+
+  "/api/profile/pin": async (d, ip) => {
+    const p = auth(d); if (!p) return NOAUTH;
+    const nk = String(d.v || "");
+    if (!/^\d{4}$/.test(nk)) return [400, { error: "La clave nueva debe tener 4 n\u00fameros." }];
+    const bad = await pinCheck(p, String(d.k || ""), ip); if (bad) return bad;
+    const salt = crypto.randomBytes(16).toString("hex");
+    await pool.query("update users set salt=$2, hash=$3 where phone=$1", [p, salt, hash(nk, salt)]);
+    return [200, { user: await pub(p), token: sign(p) }];
   },
 
   // La app pide un codigo para RECIBIR plata (se usa en la web)

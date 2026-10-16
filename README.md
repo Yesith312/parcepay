@@ -12,4 +12,5 @@ El dinero es simulado.
 render.yaml                 debe estar en la raiz del repositorio
 app/src/com/parcepay/app/   pantallas y logica de la app
 server/                     server.js (API), web/index.html, package.json
-server_url.txt              direccion del servidor que usa la app
+server_url.txt              direccion de Render que usa la app (lo creas tu, ver paso 4)
+logo.png, logo_icon.png, logo_app.png   logo (para cambiarlo reemplaza logo_icon.png 192x192 y logo_app.png 256x256)

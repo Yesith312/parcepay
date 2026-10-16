@@ -1,7 +1,8 @@
 package com.parcepay.app;
 
 import android.content.Context;
-import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.text.InputFilter;
@@ -10,8 +11,10 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import java.io.InputStream;
 
 /** Piezas de interfaz reutilizables. */
 final class Ui {
@@ -141,16 +144,34 @@ final class Ui {
         LinearLayout box = new LinearLayout(c);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER_HORIZONTAL);
-        final TextView coin = tv("P", 34, Theme.BLUE, true);
-        coin.setGravity(Gravity.CENTER);
-        coin.setBackground(oval(Theme.WHITE, false));
-        coin.setElevation(dp(6));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(74), dp(74));
+        // Si el APK trae logo.png (carpeta assets) se usa; si no, la moneda con la P
+        Bitmap bmp = null;
+        try {
+            InputStream in = c.getAssets().open("logo.png");
+            bmp = BitmapFactory.decodeStream(in);
+            in.close();
+        } catch (Exception e) { }
+        final View mark;
+        LinearLayout.LayoutParams lp;
+        if (bmp != null) {
+            ImageView iv = new ImageView(c);
+            iv.setImageBitmap(bmp);
+            iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            mark = iv;
+            lp = new LinearLayout.LayoutParams(dp(96), dp(96));
+        } else {
+            TextView coin = tv("P", 34, Theme.BLUE, true);
+            coin.setGravity(Gravity.CENTER);
+            coin.setBackground(oval(Theme.WHITE, false));
+            coin.setElevation(dp(6));
+            mark = coin;
+            lp = new LinearLayout.LayoutParams(dp(74), dp(74));
+        }
         lp.bottomMargin = dp(14);
-        coin.setLayoutParams(lp);
-        coin.setRotationY(540f);
-        coin.post(new Runnable() { public void run() { coin.animate().rotationY(0f).setDuration(1100).start(); } });
-        box.addView(coin);
+        mark.setLayoutParams(lp);
+        mark.setRotationY(540f);
+        mark.post(new Runnable() { public void run() { mark.animate().rotationY(0f).setDuration(1100).start(); } });
+        box.addView(mark);
         LinearLayout row = new LinearLayout(c);
         row.addView(tv("Parce", 40, Theme.WHITE, true));
         row.addView(tv("Pay", 40, 0xFFBFD3FF, true));

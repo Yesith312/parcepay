@@ -38,6 +38,9 @@ class HomeScreen extends Screen {
         av.setGravity(Gravity.CENTER);
         av.setBackground(Ui.oval(Theme.BLUE, false));
         av.setLayoutParams(new LinearLayout.LayoutParams(Ui.dp(44), Ui.dp(44)));
+        av.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { a.go(new ProfileScreen(a), false); }
+        });
         hd.addView(av);
         p.addView(hd);
 
@@ -93,11 +96,18 @@ class HomeScreen extends Screen {
         renderMovs();
 
         p.addView(Ui.spacer());
+        Button perfil = Ui.btn("Mi perfil", Theme.SKY, Theme.BLUE2, new View.OnClickListener() {
+            public void onClick(View v) { a.go(new ProfileScreen(a), false); }
+        });
+        LinearLayout.LayoutParams lpf = new LinearLayout.LayoutParams(-1, Ui.dp(54));
+        lpf.topMargin = Ui.dp(26);
+        perfil.setLayoutParams(lpf);
+        p.addView(perfil);
         Button out = Ui.btn("Cerrar sesi\u00f3n", Theme.SKY, Theme.BLUE2, new View.OnClickListener() {
-            public void onClick(View v) { Session.clear(); a.go(new WelcomeScreen(a), true); }
+            public void onClick(View v) { Session.clear(); a.go(a.entry(), true); }
         });
         LinearLayout.LayoutParams lo = new LinearLayout.LayoutParams(-1, Ui.dp(54));
-        lo.topMargin = Ui.dp(26);
+        lo.topMargin = Ui.dp(10);
         out.setLayoutParams(lo);
         p.addView(out);
 
@@ -162,7 +172,7 @@ class HomeScreen extends Screen {
             public void on(JSONObject r) {
                 if (a.current != HomeScreen.this) return;
                 if (r.has("error")) {
-                    if (r.optString("error").startsWith("Sesi")) { Session.clear(); a.go(new WelcomeScreen(a), true); }
+                    if (r.optString("error").startsWith("Sesi")) { Session.clear(); a.go(a.entry(), true); }
                     return;
                 }
                 JSONObject u = r.optJSONObject("user");

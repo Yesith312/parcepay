@@ -31,12 +31,22 @@ class PinScreen extends Screen {
 
     View build() {
         LinearLayout p = Ui.page(false);
-        p.addView(Ui.back(new View.OnClickListener() {
-            public void onClick(View v) { onBack(); }
-        }));
+        if (prev == null) {
+            // Entrada directa con el numero guardado: no hay pantalla anterior
+            TextView other = Ui.tv("Usar otro n\u00famero", 16, Theme.BLUE, true);
+            other.setPadding(0, Ui.dp(6), Ui.dp(20), Ui.dp(14));
+            other.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { Session.forget(); a.go(new WelcomeScreen(a), false); }
+            });
+            p.addView(other);
+        } else {
+            p.addView(Ui.back(new View.OnClickListener() {
+                public void onClick(View v) { onBack(); }
+            }));
+        }
         title = Ui.tv(mode == LOGIN ? "Pon tu clave" : "Crea tu clave", 24, Theme.INK, true);
         p.addView(title);
-        sub = Ui.tv(mode == LOGIN ? "Son 4 n\u00fameros." : "Elige 4 n\u00fameros que recuerdes.", 15, Theme.MUT, false);
+        sub = Ui.tv(mode == LOGIN ? "Celular " + Session.pretty(phone) + "\nSon 4 n\u00fameros." : "Elige 4 n\u00fameros que recuerdes.", 15, Theme.MUT, false);
         sub.setPadding(0, Ui.dp(4), 0, 0);
         p.addView(sub);
         dotsBox = new LinearLayout(a);
@@ -120,6 +130,7 @@ class PinScreen extends Screen {
                     if (r.has("error")) { shake(r.optString("error")); return; }
                     Session.user = r.optJSONObject("user");
                     Session.token = r.optString("token");
+                    Session.save(phone);
                     a.go(new HomeScreen(a), false);
                 }
             });
@@ -151,10 +162,11 @@ class PinScreen extends Screen {
                 if (r.has("error")) { pin = ""; paint(false); err.setText(r.optString("error")); return; }
                 Session.user = r.optJSONObject("user");
                     Session.token = r.optString("token");
+                Session.save(pend.optString("p"));
                 a.go(new HomeScreen(a), false);
             }
         });
     }
 
-    boolean onBack() { a.go(prev, true); return true; }
+    boolean onBack() { if (prev == null) return false; a.go(prev, true); return true; }
 }

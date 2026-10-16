@@ -24,6 +24,13 @@ public class MainActivity extends Activity {
         go(new SplashScreen(this), false);
     }
 
+    /** Celular con numero guardado -> clave directo. Celular nuevo -> Crear cuenta / Iniciar sesion. */
+    Screen entry() {
+        String p = Session.saved();
+        if (Session.validPhone(p)) return new PinScreen(this, null, p, null);
+        return new WelcomeScreen(this);
+    }
+
     void go(Screen s, boolean back) {
         if (current != null) current.onLeave();
         current = s;
