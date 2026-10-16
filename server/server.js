@@ -329,6 +329,24 @@ const H = {
     return r.rowCount ? [200, { ok: true }] : [400, { error: "Ese numero no tiene cuenta." }];
   },
 
+  // Eliminar una cuenta (solo con BOT_KEY). Con dry:true solo muestra de quien es.
+  "/api/admin/delete": async (d, ip) => {
+    if (locked("b:" + ip)) return [429, { error: "Espera." }];
+    if (!botKeyOk(String(d.key || ""))) { fail("b:" + ip); return [401, { error: "No autorizado" }]; }
+    const p = String(d.p || "");
+    const u = (await pool.query("select nombres, apellidos, saldo from users where phone=$1", [p])).rows[0];
+    if (!u) return [400, { error: "Ese numero no tiene cuenta." }];
+    const info = { nombre: u.nombres + " " + u.apellidos, saldo: Number(u.saldo) };
+    if (d.dry) return [200, Object.assign({ dry: true }, info)];
+    await tx(async db => {
+      await db.query("delete from movs where phone=$1", [p]);
+      await db.query("delete from codes where phone=$1", [p]);
+      await db.query("delete from outbox where phone=$1", [p]);
+      await db.query("delete from users where phone=$1", [p]);
+    });
+    return [200, Object.assign({ ok: true }, info)];
+  },
+
   // La app pide un codigo para RECIBIR plata (se usa en la web)
   "/api/deposit-code": async d => {
     const p = auth(d); if (!p) return NOAUTH;
