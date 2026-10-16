@@ -146,11 +146,20 @@ const H = {
     return [200, { exists: (await pool.query("select 1 from users where phone=$1", [p])).rowCount > 0 }];
   },
 
-  "/api/register": async d => {
+  "/api/register": async (d, ip) => {
     const p = String(d.p || ""), cc = String(d.cc || ""), k = String(d.k || "");
     const n = String(d.n || "").trim().slice(0, 60), a = String(d.a || "").trim().slice(0, 60), f = String(d.f || "").slice(0, 10);
     if (!phoneOk(p)) return [400, { error: "Celular inv\u00e1lido" }];
     if (!/^\d{6,10}$/.test(cc) || !n || !a || !f || !/^\d{4}$/.test(k)) return [400, { error: "Datos incompletos." }];
+    if (BOT_KEY) {
+      // Con el bot activo, la cuenta solo se crea con el codigo que llego por WhatsApp
+      const c = String(d.c || "");
+      if (!/^\d{6}$/.test(c)) return [400, { error: "Falta el c\u00f3digo de WhatsApp." }];
+      if (locked("g:" + p)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
+      const used = await pool.query("delete from codes where phone=$1 and tipo='reg' and code=$2 and expires_at > now()", [p, c]);
+      if (used.rowCount === 0) { fail("g:" + p); return BAD_CODE; }
+      clear("g:" + p);
+    }
     const salt = crypto.randomBytes(16).toString("hex");
     try {
       // La cedula se guarda como huella (no en texto plano)
@@ -283,6 +292,32 @@ const H = {
     if (locked("b:" + ip)) return [429, { error: "Espera." }];
     if (!botKeyOk(String(d.key || ""))) { fail("b:" + ip); return [401, { error: "No autorizado" }]; }
     await pool.query("delete from outbox where id=$1", [Number(d.id) || 0]);
+    return [200, { ok: true }];
+  },
+
+  // ---------- crear cuenta: codigo por WhatsApp ----------
+  "/api/register/code": async (d, ip) => {
+    const p = String(d.p || "");
+    if (!phoneOk(p)) return [400, { error: "Celular inv\u00e1lido" }];
+    if (!BOT_KEY) return [200, { skip: true }];
+    if (locked("gi:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
+    fail("gi:" + ip); // cada pedido cuenta, para que nadie use el bot para llenar de mensajes a otros numeros
+    if ((await pool.query("select 1 from users where phone=$1", [p])).rowCount > 0) return [400, { error: "Ese n\u00famero ya tiene cuenta. Inicia sesi\u00f3n." }];
+    if (!botUp()) return NOBOT;
+    const recent = await pool.query("select 1 from codes where phone=$1 and tipo='reg' and expires_at > now() + interval '" + (CODE_TTL - 60) + " seconds'", [p]);
+    if (recent.rowCount > 0) return [429, { error: "Ya te mandamos un c\u00f3digo. Espera un minuto para pedir otro." }];
+    const code = await setCode(p, "reg", 0);
+    await queueWA(p, "ParcePay: tu c\u00f3digo para crear tu cuenta es " + code + ". Vence en 10 minutos. Si no fuiste t\u00fa, ignora este mensaje.");
+    return [200, { ok: true }];
+  },
+
+  "/api/register/check": async d => {
+    const p = String(d.p || ""), c = String(d.c || "");
+    if (!BOT_KEY) return [200, { ok: true }];
+    if (!phoneOk(p) || !/^\d{6}$/.test(c)) return BAD_CODE;
+    if (locked("g:" + p)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
+    const e = await pool.query("select 1 from codes where phone=$1 and tipo='reg' and code=$2 and expires_at > now()", [p, c]);
+    if (e.rowCount === 0) { fail("g:" + p); return BAD_CODE; }
     return [200, { ok: true }];
   },
 

@@ -5,11 +5,13 @@
 // (o guarda la clave en bot/bot_key.txt y el numero en bot/bot_number.txt)
 // La direccion del servidor se lee de ../server_url.txt (la misma que usa la app).
 const fs = require("fs"), path = require("path");
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
+const baileys = require("@whiskeysockets/baileys");
+const makeWASocket = baileys.default;
+const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = baileys;
 const pino = require("pino");
 
 const read = f => { try { return fs.readFileSync(path.join(__dirname, f), "utf8").trim(); } catch (e) { return ""; } };
-const SERVER = (process.env.PARCEPAY_URL || read("../server_url.txt")).replace(/\/+$/, "");
+const SERVER = (process.env.PARCEPAY_URL || read("server_url.txt") || read("../server_url.txt")).replace(/\/+$/, "");
 const KEY = process.env.BOT_KEY || read("bot_key.txt");
 const NUM = (process.env.BOT_NUMBER || read("bot_number.txt")).replace(/\D/g, "");
 if (!SERVER || !KEY || !NUM) {
@@ -30,7 +32,7 @@ let sock = null, ready = false;
 async function start() {
   const { state, saveCreds } = await useMultiFileAuthState(path.join(__dirname, "auth"));
   const { version } = await fetchLatestBaileysVersion();
-  sock = makeWASocket({ version, auth: state, logger: pino({ level: "silent" }), browser: ["ParcePay", "Chrome", "1.0"], markOnlineOnConnect: false });
+  sock = makeWASocket({ version, auth: state, logger: pino({ level: "silent" }), browser: Browsers ? Browsers.ubuntu("Chrome") : ["Ubuntu", "Chrome", "22.04.4"], markOnlineOnConnect: false });
   sock.ev.on("creds.update", saveCreds);
   let asked = false;
   sock.ev.on("connection.update", async u => {

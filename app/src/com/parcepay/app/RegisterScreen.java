@@ -91,7 +91,14 @@ class RegisterScreen extends Screen {
             public void on(JSONObject r) {
                 if (r.has("error")) { err.setText(r.optString("error")); return; }
                 if (r.optBoolean("exists")) { err.setText("Ese n\u00famero ya tiene cuenta. Inicia sesi\u00f3n."); return; }
-                a.go(new PinScreen(a, RegisterScreen.this, null, data), false);
+                // Manda el codigo de WhatsApp para confirmar el celular
+                Api.call(a, "register/code", Api.obj("p", data.optString("p")), new Api.Cb() {
+                    public void on(JSONObject r2) {
+                        if (r2.has("error")) { err.setText(r2.optString("error")); return; }
+                        if (r2.optBoolean("skip")) a.go(new PinScreen(a, RegisterScreen.this, null, data), false);
+                        else a.go(new VerifyScreen(a, RegisterScreen.this, data), false);
+                    }
+                });
             }
         });
     }
