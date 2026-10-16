@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.os.Handler;
 import android.view.View;
+import android.view.WindowManager;
+import org.json.JSONObject;
 import android.widget.FrameLayout;
 
 /** Contenedor: solo maneja la navegacion entre pantallas. */
@@ -11,10 +13,16 @@ public class MainActivity extends Activity {
     FrameLayout root;
     Handler h = new Handler();
     Screen current;
+    /** true = no se puede hacer captura de pantalla ni grabar la app (ponlo en false para tomar capturas de promocion). */
+    static final boolean SECURE = true;
+    /** Si la app estuvo en segundo plano mas de esto, vuelve a pedir la clave. */
+    static final long LOCK_MS = 180000;
+    long pausedAt = 0;
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        if (SECURE) getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         Ui.init(this);
         Api.wake();
         getWindow().setStatusBarColor(Theme.BLUE);
@@ -41,6 +49,25 @@ public class MainActivity extends Activity {
         v.setTranslationX(Ui.dp(back ? -30 : 30));
         v.animate().alpha(1f).translationX(0f).setDuration(300).start();
         s.onShow();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        pausedAt = System.currentTimeMillis();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (pausedAt > 0 && Session.token.length() > 0 && System.currentTimeMillis() - pausedAt > LOCK_MS) {
+            Api.call(this, "logout", Api.obj("t", Session.token), new Api.Cb() {
+                public void on(JSONObject r) { }
+            });
+            Session.clear();
+            go(entry(), true);
+        }
+        pausedAt = 0;
     }
 
     @Override

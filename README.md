@@ -21,3 +21,9 @@ BOT DE WHATSAPP (codigos de meter/sacar plata y cambio de clave)
 3) BOT_KEY=la_clave BOT_NUMBER=573001234567 node bot.js
    La primera vez sale un CODIGO: en WhatsApp > Dispositivos vinculados > Vincular con el numero de telefono.
 Mientras el bot este apagado, la app avisa que el WhatsApp no esta disponible.
+
+SEGURIDAD
+- Render > Environment: SECRET, BOT_KEY y ADMIN_KEY deben existir y ser distintas. Guarda una copia de SECRET en un lugar seguro:
+  sin ella no se pueden leer los datos cifrados ni los respaldos.
+- Comandos de administrador (desbloquear, eliminar, respaldo) usan ADMIN_KEY, nunca BOT_KEY.
+- La base gratis de Render se borra a los 30 dias y no tiene copias: pasa a un plan pago o haz respaldos con respaldo.sh.

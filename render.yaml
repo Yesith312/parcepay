@@ -16,6 +16,8 @@ services:
         generateValue: true
       - key: BOT_KEY
         generateValue: true
+      - key: ADMIN_KEY
+        generateValue: true
 
 databases:
   - name: parcepay-db

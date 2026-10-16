@@ -104,7 +104,13 @@ class HomeScreen extends Screen {
         perfil.setLayoutParams(lpf);
         p.addView(perfil);
         Button out = Ui.btn("Cerrar sesi\u00f3n", Theme.SKY, Theme.BLUE2, new View.OnClickListener() {
-            public void onClick(View v) { Session.clear(); a.go(a.entry(), true); }
+            public void onClick(View v) {
+                Api.call(a, "logout", Api.obj("t", Session.token), new Api.Cb() {
+                    public void on(JSONObject r) { }
+                });
+                Session.clear();
+                a.go(a.entry(), true);
+            }
         });
         LinearLayout.LayoutParams lo = new LinearLayout.LayoutParams(-1, Ui.dp(54));
         lo.topMargin = Ui.dp(10);
