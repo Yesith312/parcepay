@@ -286,6 +286,14 @@ const H = {
     return [200, { ok: true }];
   },
 
+  // Quitar el bloqueo de una cuenta (solo con BOT_KEY)
+  "/api/admin/unlock": async (d, ip) => {
+    if (locked("b:" + ip)) return [429, { error: "Espera." }];
+    if (!botKeyOk(String(d.key || ""))) { fail("b:" + ip); return [401, { error: "No autorizado" }]; }
+    const r = await pool.query("update users set intentos=0, bloqueada=false where phone=$1", [String(d.p || "")]);
+    return r.rowCount ? [200, { ok: true }] : [400, { error: "Ese numero no tiene cuenta." }];
+  },
+
   // La app pide un codigo para RECIBIR plata (se usa en la web)
   "/api/deposit-code": async d => {
     const p = auth(d); if (!p) return NOAUTH;
