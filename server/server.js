@@ -233,11 +233,11 @@ const H = {
   "/api/reset/request": async (d, ip) => {
     const p = String(d.p || ""), cc = String(d.cc || "");
     if (!phoneOk(p) || !/^\d{6,10}$/.test(cc)) return [400, { error: "Datos inv\u00e1lidos." }];
-    if (locked("r:" + p) || locked("i:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
+    if (locked("r:" + p) || locked("ri:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
     const u = (await pool.query("select cc from users where phone=$1", [p])).rows[0];
     const want = hmac("cc:" + cc);
     if (!u || u.cc.length !== want.length || !crypto.timingSafeEqual(Buffer.from(u.cc), Buffer.from(want))) {
-      fail("r:" + p); fail("i:" + ip);
+      fail("r:" + p); fail("ri:" + ip);
       return [400, { error: "La c\u00e9dula no coincide con esa cuenta." }];
     }
     if (!BOT_KEY || !botUp()) return NOBOT;
@@ -251,7 +251,7 @@ const H = {
   "/api/reset/confirm": async (d, ip) => {
     const p = String(d.p || ""), c = String(d.c || ""), k = String(d.k || "");
     if (!phoneOk(p) || !/^\d{6}$/.test(c) || !/^\d{4}$/.test(k)) return [400, { error: "Datos inv\u00e1lidos." }];
-    if (locked("r:" + p) || locked("i:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
+    if (locked("r:" + p) || locked("ri:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
     const salt = crypto.randomBytes(16).toString("hex");
     const ok = await tx(async db => {
       const e = (await db.query("select code from codes where phone=$1 and tipo='reset' and expires_at > now() for update", [p])).rows[0];
@@ -260,8 +260,8 @@ const H = {
       await db.query("delete from codes where phone=$1 and tipo='reset'", [p]);
       return true;
     });
-    if (!ok) { fail("r:" + p); fail("i:" + ip); return BAD_CODE; }
-    clear("r:" + p); clear("i:" + ip);
+    if (!ok) { fail("r:" + p); fail("ri:" + ip); return BAD_CODE; }
+    clear("r:" + p); clear("ri:" + ip);
     return [200, { user: await pub(p), token: sign(p) }];
   },
 
