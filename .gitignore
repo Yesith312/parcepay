@@ -4,3 +4,9 @@ data.json
 .env
 *.apk
 *.jks
+
+bot/auth/
+bot/node_modules/
+bot/bot_key.txt
+bot/bot_number.txt
+node_modules/

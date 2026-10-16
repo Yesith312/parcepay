@@ -64,6 +64,15 @@ class PinScreen extends Screen {
         err.setGravity(Gravity.CENTER);
         err.setPadding(0, Ui.dp(8), 0, 0);
         p.addView(err);
+        if (mode == LOGIN) {
+            TextView forgot = Ui.tv("\u00bfOlvidaste tu clave?", 15, Theme.BLUE, true);
+            forgot.setGravity(Gravity.CENTER);
+            forgot.setPadding(0, Ui.dp(14), 0, Ui.dp(6));
+            forgot.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { a.go(new ResetScreen(a, PinScreen.this, phone), false); }
+            });
+            p.addView(forgot);
+        }
         p.addView(Ui.spacer());
         String[][] rows = {{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"", "0", "\u232b"}};
         for (int r = 0; r < 4; r++) {

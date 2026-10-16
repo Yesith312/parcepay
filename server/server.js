@@ -65,6 +65,13 @@ async function init() {
       phone text not null, tipo text not null, code text not null, monto bigint not null default 0,
       expires_at timestamptz not null, primary key(phone, tipo));
   `);
+  await pool.query(`
+    alter table users add column if not exists intentos int not null default 0;
+    alter table users add column if not exists bloqueada boolean not null default false;
+    create table if not exists outbox(
+      id bigserial primary key, phone text not null, text text not null,
+      tries int not null default 0, claimed_at timestamptz, created_at timestamptz not null default now());
+  `);
 }
 
 async function pub(p) {
@@ -92,15 +99,42 @@ async function tx(fn) {
   catch (e) { try { await c.query("rollback"); } catch (x) {} throw e; }
   finally { c.release(); }
 }
-// Confirma la clave actual (para cambios del perfil)
-async function pinCheck(p, k, ip) {
-  if (locked("l:" + p) || locked("i:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
-  const u = (await pool.query("select salt, hash from users where phone=$1", [p])).rows[0];
-  if (!u) return NOAUTH;
+// Confirma la clave. A los 5 fallos seguidos la clave se bloquea hasta que se cambie con el codigo de WhatsApp.
+const MAX_TRIES = 5;
+async function verifyPin(p, k, ip) {
+  if (locked("i:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
+  const u = (await pool.query("select salt, hash, bloqueada, intentos from users where phone=$1", [p])).rows[0];
+  if (!u) return [400, { error: "Ese n\u00famero no tiene cuenta." }];
+  if (u.bloqueada) return [423, { locked: true, error: "Tu clave est\u00e1 bloqueada. Toca \u00bfOlvidaste tu clave? para cambiarla." }];
   const ok = /^\d{4}$/.test(k) && crypto.timingSafeEqual(Buffer.from(hash(k, u.salt)), Buffer.from(u.hash));
-  if (!ok) { fail("l:" + p); fail("i:" + ip); return [400, { error: "Tu clave actual no es correcta." }]; }
-  clear("l:" + p);
-  return null;
+  if (ok) {
+    if (u.intentos > 0) await pool.query("update users set intentos=0 where phone=$1", [p]);
+    return null;
+  }
+  fail("i:" + ip);
+  const r = (await pool.query(
+    "update users set intentos = intentos + 1, bloqueada = (intentos + 1 >= $2) where phone=$1 returning intentos, bloqueada", [p, MAX_TRIES])).rows[0];
+  if (r.bloqueada) return [423, { locked: true, error: "Fallaste 5 veces y bloqueamos tu clave por seguridad. Toca \u00bfOlvidaste tu clave? para cambiarla." }];
+  const left = MAX_TRIES - r.intentos;
+  return [400, { error: "Clave incorrecta. " + (left === 1 ? "Te queda 1 intento." : "Te quedan " + left + " intentos.") }];
+}
+const pinCheck = verifyPin;
+
+// ---------- WhatsApp (bot) ----------
+// El bot (carpeta bot/) pregunta cada pocos segundos si hay mensajes y los manda desde tu numero.
+const BOT_KEY = process.env.BOT_KEY || "";
+let botSeen = 0;
+const botUp = () => Date.now() - botSeen < 60000;
+const botKeyOk = k => !!BOT_KEY && k.length === BOT_KEY.length && crypto.timingSafeEqual(Buffer.from(k), Buffer.from(BOT_KEY));
+const queueWA = (p, text) => pool.query("insert into outbox(phone, text) values($1,$2)", [p, text]);
+const NOBOT = [503, { error: "El WhatsApp de ParcePay no est\u00e1 disponible ahora. Intenta en un minuto." }];
+// Sin BOT_KEY (bot sin configurar) el codigo sigue saliendo en la app como antes.
+async function giveCode(p, tipo, monto, msg) {
+  if (!BOT_KEY) return { code: await setCode(p, tipo, monto) };
+  if (!botUp()) return null;
+  const code = await setCode(p, tipo, monto);
+  await queueWA(p, msg(code));
+  return { wa: true };
 }
 
 const BAD_CODE = [400, { error: "N\u00famero o c\u00f3digo incorrecto, o el c\u00f3digo ya venci\u00f3." }];
@@ -132,12 +166,7 @@ const H = {
   "/api/login": async (d, ip) => {
     const p = String(d.p || "");
     if (!phoneOk(p)) return [400, { error: "Celular inv\u00e1lido" }];
-    if (locked("l:" + p) || locked("i:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
-    const u = (await pool.query("select salt, hash from users where phone=$1", [p])).rows[0];
-    if (!u) return [400, { error: "Ese n\u00famero no tiene cuenta." }];
-    const ok = crypto.timingSafeEqual(Buffer.from(hash(String(d.k || ""), u.salt)), Buffer.from(u.hash));
-    if (!ok) { fail("l:" + p); fail("i:" + ip); return [400, { error: "Clave incorrecta. Intenta de nuevo." }]; }
-    clear("l:" + p);
+    const bad = await verifyPin(p, String(d.k || ""), ip); if (bad) return bad;
     return [200, { user: await pub(p), token: sign(p) }];
   },
 
@@ -200,10 +229,69 @@ const H = {
     return [200, { user: await pub(p), token: sign(p) }];
   },
 
+  // ---------- olvide / bloqueo de clave: cedula + codigo por WhatsApp ----------
+  "/api/reset/request": async (d, ip) => {
+    const p = String(d.p || ""), cc = String(d.cc || "");
+    if (!phoneOk(p) || !/^\d{6,10}$/.test(cc)) return [400, { error: "Datos inv\u00e1lidos." }];
+    if (locked("r:" + p) || locked("i:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
+    const u = (await pool.query("select cc from users where phone=$1", [p])).rows[0];
+    const want = hmac("cc:" + cc);
+    if (!u || u.cc.length !== want.length || !crypto.timingSafeEqual(Buffer.from(u.cc), Buffer.from(want))) {
+      fail("r:" + p); fail("i:" + ip);
+      return [400, { error: "La c\u00e9dula no coincide con esa cuenta." }];
+    }
+    if (!BOT_KEY || !botUp()) return NOBOT;
+    const recent = await pool.query("select 1 from codes where phone=$1 and tipo='reset' and expires_at > now() + interval '" + (CODE_TTL - 60) + " seconds'", [p]);
+    if (recent.rowCount > 0) return [429, { error: "Ya te mandamos un c\u00f3digo. Espera un minuto para pedir otro." }];
+    const code = await setCode(p, "reset", 0);
+    await queueWA(p, "ParcePay: tu c\u00f3digo para cambiar la clave es " + code + ". Vence en 10 minutos. Si no fuiste t\u00fa, ignora este mensaje y no lo compartas.");
+    return [200, { ok: true, ttl: CODE_TTL }];
+  },
+
+  "/api/reset/confirm": async (d, ip) => {
+    const p = String(d.p || ""), c = String(d.c || ""), k = String(d.k || "");
+    if (!phoneOk(p) || !/^\d{6}$/.test(c) || !/^\d{4}$/.test(k)) return [400, { error: "Datos inv\u00e1lidos." }];
+    if (locked("r:" + p) || locked("i:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
+    const salt = crypto.randomBytes(16).toString("hex");
+    const ok = await tx(async db => {
+      const e = (await db.query("select code from codes where phone=$1 and tipo='reset' and expires_at > now() for update", [p])).rows[0];
+      if (!e || e.code !== c) return false;
+      await db.query("update users set salt=$2, hash=$3, intentos=0, bloqueada=false where phone=$1", [p, salt, hash(k, salt)]);
+      await db.query("delete from codes where phone=$1 and tipo='reset'", [p]);
+      return true;
+    });
+    if (!ok) { fail("r:" + p); fail("i:" + ip); return BAD_CODE; }
+    clear("r:" + p); clear("i:" + ip);
+    return [200, { user: await pub(p), token: sign(p) }];
+  },
+
+  // ---------- el bot de WhatsApp ----------
+  "/api/bot/pull": async (d, ip) => {
+    if (locked("b:" + ip)) return [429, { error: "Espera." }];
+    if (!botKeyOk(String(d.key || ""))) { fail("b:" + ip); return [401, { error: "No autorizado" }]; }
+    botSeen = Date.now();
+    if (Math.random() < 0.05) await pool.query("delete from outbox where created_at < now() - interval '10 minutes'");
+    const r = await pool.query(
+      `update outbox set tries = tries + 1, claimed_at = now() where id in (
+         select id from outbox where tries < 3 and created_at > now() - interval '10 minutes'
+           and (claimed_at is null or claimed_at < now() - interval '30 seconds')
+         order by id limit 10 for update skip locked) returning id, phone, text`);
+    return [200, { msgs: r.rows }];
+  },
+
+  "/api/bot/done": async (d, ip) => {
+    if (locked("b:" + ip)) return [429, { error: "Espera." }];
+    if (!botKeyOk(String(d.key || ""))) { fail("b:" + ip); return [401, { error: "No autorizado" }]; }
+    await pool.query("delete from outbox where id=$1", [Number(d.id) || 0]);
+    return [200, { ok: true }];
+  },
+
   // La app pide un codigo para RECIBIR plata (se usa en la web)
   "/api/deposit-code": async d => {
     const p = auth(d); if (!p) return NOAUTH;
-    return [200, { code: await setCode(p, "in", 0), phone: p, ttl: CODE_TTL }];
+    const g = await giveCode(p, "in", 0, c => "ParcePay: tu c\u00f3digo para meter plata es " + c + ". Escr\u00edbelo en la web de recarga. Vence en 10 minutos. No lo compartas con nadie.");
+    if (!g) return NOBOT;
+    return [200, Object.assign({ phone: p, ttl: CODE_TTL }, g)];
   },
 
   // La app pide un codigo para SACAR plata (se usa en el cajero de la web)
@@ -214,7 +302,9 @@ const H = {
     const u = (await pool.query("select saldo from users where phone=$1", [p])).rows[0];
     if (!u) return NOAUTH;
     if (v > Number(u.saldo)) return [400, { error: "No te alcanza. Disponible: " + money(Number(u.saldo)) }];
-    return [200, { code: await setCode(p, "out", v), phone: p, ttl: CODE_TTL, v }];
+    const g = await giveCode(p, "out", v, c => "ParcePay: tu c\u00f3digo para sacar " + money(v) + " en el cajero es " + c + ". Vence en 10 minutos. No lo compartas con nadie.");
+    if (!g) return NOBOT;
+    return [200, Object.assign({ phone: p, ttl: CODE_TTL, v }, g)];
   },
 
   // Web: meter plata con celular + codigo + monto

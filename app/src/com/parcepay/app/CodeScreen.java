@@ -55,8 +55,9 @@ class CodeScreen extends Screen {
         l2.setPadding(0, Ui.dp(16), 0, 0);
         c.addView(l2);
         String cd = code.length() == 6 ? code.substring(0, 3) + " " + code.substring(3) : code;
-        TextView ct = Ui.tv(cd, 42, Theme.WHITE, true);
-        ct.setLetterSpacing(.08f);
+        boolean wa = code.length() == 0;
+        TextView ct = wa ? Ui.tv("Te lo enviamos por WhatsApp", 20, Theme.WHITE, true) : Ui.tv(cd, 42, Theme.WHITE, true);
+        if (!wa) ct.setLetterSpacing(.08f);
         c.addView(ct);
         p.addView(c);
 
@@ -65,7 +66,7 @@ class CodeScreen extends Screen {
         timer.setPadding(0, Ui.dp(16), 0, 0);
         p.addView(timer);
         p.addView(Ui.spacer());
-        p.addView(Ui.btn("Copiar c\u00f3digo", Theme.SKY, Theme.BLUE2, new View.OnClickListener() {
+        if (code.length() > 0) p.addView(Ui.btn("Copiar c\u00f3digo", Theme.SKY, Theme.BLUE2, new View.OnClickListener() {
             public void onClick(View v) {
                 ClipboardManager cm = (ClipboardManager) a.getSystemService(Context.CLIPBOARD_SERVICE);
                 cm.setPrimaryClip(ClipData.newPlainText("codigo", code));
