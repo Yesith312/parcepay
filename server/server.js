@@ -69,7 +69,7 @@ async function auth(d) {
 }
 
 // Sesion de los puntos de recarga (cajeros): token aparte, dura 1 hora
-const TOKEN_PT_MS = 3600e3;
+const TOKEN_PT_MS = 20 * 60e3;
 async function signPunto(id) {
   const r = (await pool.query("select tv from puntos where id=$1", [id])).rows[0];
   const body = Buffer.from(JSON.stringify({ p: id, k: "pt", v: r ? r.tv : 0, exp: Date.now() + TOKEN_PT_MS })).toString("base64url");
@@ -575,7 +575,7 @@ const H = {
 
   "/api/punto/me": async d => {
     const pt = await authPunto(d); if (!pt) return NOAUTH;
-    return [200, await puntoView(pt.id)];
+    return [200, Object.assign(await puntoView(pt.id), { token: await signPunto(pt.id) })];
   },
 
   "/api/punto/logout": async d => {

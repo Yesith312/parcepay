@@ -132,19 +132,23 @@ footer{text-align:center;color:var(--mut);font-size:12px;padding:0 20px 30px}
 </div>
 
 </main>
-<footer>ParcePay &middot; Portal de puntos autorizados &middot; La sesi&oacute;n se cierra sola tras 10 minutos sin actividad.</footer>
+<footer>ParcePay &middot; Portal de puntos autorizados &middot; Recargar la p&aacute;gina no cierra la sesi&oacute;n; se cierra tras 10 minutos sin actividad o al cerrar la pesta&ntilde;a.</footer>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
 const peso = v => "$" + Math.round(v).toLocaleString("es-CO");
 const IDLE_MS = 10 * 60 * 1000;
 const PASS_RE = /^(?=.*[A-Za-z])(?=.*\d).{8,64}$/;
-// La sesion vive solo en la memoria de la pagina: al recargar o cerrar, hay que entrar de nuevo.
+// La sesion se guarda en sessionStorage: sobrevive a recargar la pagina, pero se borra al cerrar la pestana.
+const KEEP = "pp";
+function save() {
+  try { if (token) sessionStorage.setItem(KEEP, JSON.stringify({ t: token, a: lastAct })); else sessionStorage.removeItem(KEEP); } catch (e) { /* sin almacenamiento */ }
+}
 let token = "", idleT = null, lastAct = Date.now(), tipo = "in", pend = null;
 
 function say(id, text, ok) { const m = $(id); m.textContent = text || ""; m.className = "msg " + (ok ? "ok" : "err"); m.hidden = !text; }
 function view(v) { ["vLogin", "vClave", "vApp"].forEach(x => { $(x).hidden = x !== v; }); $("bOut").hidden = v === "vLogin"; }
-function touch() { lastAct = Date.now(); clearTimeout(idleT); if (token) idleT = setTimeout(() => logout("Sesi\u00f3n cerrada por inactividad."), IDLE_MS); }
+function touch() { lastAct = Date.now(); save(); clearTimeout(idleT); if (token) idleT = setTimeout(() => logout("Sesi\u00f3n cerrada por inactividad."), IDLE_MS); }
 
 async function api(path, body) {
   try {
@@ -157,7 +161,7 @@ async function api(path, body) {
 
 function logout(msg) {
   if (token) api("punto/logout");
-  token = ""; pend = null; clearTimeout(idleT);
+  token = ""; save(); pend = null; clearTimeout(idleT);
   document.querySelectorAll("input").forEach(i => { i.value = ""; });
   $("box").hidden = true; $("fOp").hidden = false;
   ["mClave", "mOp", "mCta"].forEach(i => say(i, ""));
@@ -184,6 +188,7 @@ function render(j) {
 async function refresh() {
   const j = await api("punto/me");
   if (j.error) return;
+  if (j.token) { token = j.token; save(); }
   if (j.cambiar) return view("vClave");
   render(j); view("vApp");
 }
@@ -254,5 +259,15 @@ bindPass("fCta", ["c2k", "c2n", "c2r"], "mCta", false);
 
 ["pointerdown", "keydown", "touchstart"].forEach(ev => document.addEventListener(ev, () => { if (token) touch(); }, { passive: true }));
 document.addEventListener("visibilitychange", () => { if (!document.hidden && token && Date.now() - lastAct > IDLE_MS) logout("Sesi\u00f3n cerrada por inactividad."); });
-view("vLogin");
+// Al abrir o recargar: si hay una sesion guardada y no paso el limite de inactividad, se retoma
+(async function restore() {
+  view("vLogin");
+  let s = null;
+  try { s = JSON.parse(sessionStorage.getItem(KEEP) || "null"); } catch (e) { /* nada guardado */ }
+  if (!s || !s.t) return;
+  if (Date.now() - s.a > IDLE_MS) { try { sessionStorage.removeItem(KEEP); } catch (e) { /* nada */ } return; }
+  token = s.t; touch();
+  await refresh();
+  if (token && !$("vLogin").hidden) logout("No se pudo retomar la sesi\u00f3n. Entra de nuevo.");
+})();
 </script></body></html>
