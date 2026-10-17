@@ -1,79 +1,258 @@
 <!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ParcePay - Punto de recarga</title>
+<meta name="robots" content="noindex,nofollow">
+<title>ParcePay - Portal de puntos de recarga</title>
 <style>
-:root{--blue:#1257F5;--blue2:#0A3FC4;--sky:#E8F0FF;--ink:#0B1B3A;--mut:#5B6B8C;--line:#D5E1FA;--red:#D6334A;--green:#0E8A5F}
-*{box-sizing:border-box}
-body{margin:0;min-height:100vh;background:var(--sky);color:var(--ink);font:16px/1.45 "Poppins",system-ui,-apple-system,"Segoe UI",sans-serif}
-header{background:linear-gradient(160deg,var(--blue),var(--blue2));color:#fff;padding:34px 20px 70px;text-align:center}
-header h1{margin:0;font-size:30px;letter-spacing:-.6px}header h1 b{color:#BFD3FF}
-header p{margin:6px 0 0;opacity:.85}
-main{max-width:440px;margin:-44px auto 40px;padding:0 16px}
-.card{background:#fff;border-radius:22px;padding:22px;box-shadow:0 10px 30px rgba(18,87,245,.15)}
-.tabs{display:flex;background:var(--sky);border-radius:14px;padding:4px;margin-bottom:18px}
-.tabs button{flex:1;border:0;background:none;padding:11px;border-radius:11px;font:inherit;font-weight:600;color:var(--mut);cursor:pointer}
-.tabs button.on{background:#fff;color:var(--blue);box-shadow:0 2px 8px rgba(0,0,0,.08)}
+:root{--blue:#1257F5;--blue2:#0A3FC4;--sky:#E8F0FF;--ink:#0B1B3A;--mut:#5B6B8C;--line:#D5E1FA;--red:#D6334A;--green:#0E8A5F;--amber:#9A5B00}
+*{box-sizing:border-box}[hidden]{display:none!important}
+body{margin:0;min-height:100vh;background:var(--sky);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{background:linear-gradient(160deg,var(--blue),var(--blue2));color:#fff;padding:18px 20px 78px}
+.bar{max-width:760px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px}
+header h1{margin:0;font-size:24px;letter-spacing:-.5px}header h1 b{color:#BFD3FF}
+header small{display:block;opacity:.85;font-size:13px}
+.leave{border:1.5px solid rgba(255,255,255,.65);background:none;color:#fff;border-radius:12px;padding:8px 14px;font:inherit;font-weight:600;cursor:pointer}
+main{max-width:760px;margin:-54px auto 20px;padding:0 16px}
+.card{background:#fff;border-radius:20px;padding:22px;box-shadow:0 10px 30px rgba(18,87,245,.15);margin-bottom:16px}
+.narrow{max-width:440px;margin-left:auto;margin-right:auto}
+h2{margin:0 0 4px;font-size:19px}
+.sub{margin:0;color:var(--mut);font-size:14px}
 label{display:block;font-size:14px;color:var(--mut);margin-top:14px}
-input{width:100%;font:inherit;padding:14px;border:1.5px solid var(--line);border-radius:14px;margin-top:6px;color:var(--ink)}
-input:focus{outline:none;border-color:var(--blue)}
-.go{width:100%;margin-top:20px;border:0;border-radius:14px;padding:15px;font:inherit;font-weight:600;background:var(--blue);color:#fff;cursor:pointer}
-.go:disabled{opacity:.6;cursor:default}
-.msg{margin-top:16px;padding:13px 14px;border-radius:14px;font-size:15px;display:none}
-.msg.ok{display:block;background:#E5F7EF;color:var(--green)}
-.msg.err{display:block;background:#FDE8EB;color:var(--red)}
-.hint{color:var(--mut);font-size:13px;text-align:center;margin-top:16px}
-form{display:none}form.on{display:block}
+input{width:100%;font:inherit;padding:13px 14px;border:1.5px solid var(--line);border-radius:14px;margin-top:6px;color:var(--ink);background:#fff}
+input:focus{outline:2px solid var(--blue);border-color:var(--blue)}
+.btn{width:100%;margin-top:18px;border:0;border-radius:14px;padding:14px;font:inherit;font-weight:600;background:var(--blue);color:#fff;cursor:pointer}
+.btn.ghost{background:var(--sky);color:var(--blue2)}
+.btn:disabled{opacity:.6;cursor:default}
+.row{display:flex;gap:10px}
+.msg{margin-top:14px;padding:12px 14px;border-radius:14px;font-size:15px}
+.msg.ok{background:#E5F7EF;color:var(--green)}.msg.err{background:#FDE8EB;color:var(--red)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+.stat{background:#fff;border-radius:18px;padding:16px;box-shadow:0 10px 30px rgba(18,87,245,.12)}
+.stat span{display:block;color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+.stat b{display:block;font-size:19px;margin-top:4px;word-break:break-word}
+.stat.big{grid-column:1/-1;background:linear-gradient(160deg,var(--blue),var(--blue2));color:#fff}
+.stat.big span{color:#BFD3FF}.stat.big b{font-size:32px}
+.tabs{display:flex;background:var(--sky);border-radius:14px;padding:4px;margin:14px 0 2px}
+.tabs button{flex:1;border:0;background:none;padding:10px;border-radius:11px;font:inherit;font-weight:600;color:var(--mut);cursor:pointer}
+.tabs button.on{background:#fff;color:var(--blue);box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.confirm{border:2px solid var(--blue);border-radius:16px;padding:16px;margin-top:16px;background:#F5F8FF}
+.confirm h3{margin:0 0 10px;font-size:16px}
+.confirm dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 14px}
+.confirm dt{color:var(--mut)}.confirm dd{margin:0;font-weight:600;text-align:right}
+.tip{background:#FFF6E5;color:var(--amber);border-radius:14px;padding:12px 14px;font-size:14px;margin-top:16px}
+.wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
+th,td{padding:9px 6px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase}
+td.n{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}th.n{text-align:right}
+.up{color:var(--green)}.down{color:var(--red)}
+.empty{color:var(--mut);text-align:center;padding:16px 0}
+footer{text-align:center;color:var(--mut);font-size:12px;padding:0 20px 30px}
+@media(max-width:480px){.stats{grid-template-columns:1fr 1fr}.stat.big b{font-size:28px}}
 </style></head>
 <body>
-<header><h1>Parce<b>Pay</b></h1><p>Punto de recarga y cajero</p></header>
-<main><div class="card">
-  <div class="tabs"><button id="t1" class="on" type="button">Meter plata</button><button id="t2" type="button">Sacar plata</button></div>
+<header><div class="bar">
+  <div><h1>Parce<b>Pay</b></h1><small>Portal de puntos de recarga</small></div>
+  <button id="bOut" class="leave" type="button" hidden>Cerrar sesi&oacute;n</button>
+</div></header>
+<main>
 
-  <form id="f1" class="on" autocomplete="off">
-    <label for="p1">Celular de la cuenta</label><input id="p1" inputmode="numeric" maxlength="10" placeholder="3001234567">
-    <label for="c1">C&oacute;digo que te lleg&oacute; por WhatsApp</label><input id="c1" inputmode="numeric" maxlength="6" placeholder="123456">
-    <label for="m1">Monto a meter (COP)</label><input id="m1" inputmode="numeric" maxlength="8" placeholder="50000">
-    <button class="go" type="submit">Meter plata</button>
+<section id="vLogin" class="card narrow">
+  <h2>Ingreso de puntos</h2>
+  <p class="sub">Entra con la cuenta de tu punto de recarga.</p>
+  <form id="fLogin">
+    <label for="u">Usuario</label>
+    <input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="24" required>
+    <label for="k">Clave</label>
+    <input id="k" name="password" type="password" autocomplete="current-password" maxlength="100" required>
+    <button id="bLogin" class="btn" type="submit">Ingresar</button>
   </form>
+  <div id="mLogin" class="msg" role="alert" hidden></div>
+  <div class="tip">Esta p&aacute;gina es solo para puntos autorizados. Si quieres abrir un punto o no puedes entrar, escribe al administrador de ParcePay.</div>
+</section>
 
-  <form id="f2" autocomplete="off">
-    <label for="p2">Celular de la cuenta</label><input id="p2" inputmode="numeric" maxlength="10" placeholder="3001234567">
-    <label for="c2">C&oacute;digo que te lleg&oacute; por WhatsApp</label><input id="c2" inputmode="numeric" maxlength="6" placeholder="123456">
-    <button class="go" type="submit">Entregar dinero</button>
+<section id="vClave" class="card narrow" hidden>
+  <h2>Cambia tu clave</h2>
+  <p class="sub">Es tu primer ingreso o te dieron una clave temporal. Elige una clave propia para continuar.</p>
+  <form id="fClave">
+    <label for="c1k">Clave actual (la temporal)</label><input id="c1k" type="password" autocomplete="current-password" maxlength="100" required>
+    <label for="c1n">Clave nueva</label><input id="c1n" type="password" autocomplete="new-password" maxlength="64" required>
+    <label for="c1r">Repite la clave nueva</label><input id="c1r" type="password" autocomplete="new-password" maxlength="64" required>
+    <button class="btn" type="submit">Guardar clave</button>
   </form>
+  <div id="mClave" class="msg" role="alert" hidden></div>
+  <div class="tip">M&iacute;nimo 8 caracteres, con letras y n&uacute;meros. No la compartas con nadie.</div>
+</section>
 
-  <div id="msg" class="msg"></div>
-  <div class="hint">En la app toca <b>Meter plata</b> o <b>Sacar</b> y te enviamos el c&oacute;digo por WhatsApp. Dura 10 minutos.</div>
-</div></main>
+<div id="vApp" hidden>
+  <div class="stats">
+    <div class="stat big"><span>Cupo disponible &middot; <i id="pName"></i></span><b id="sCupo">$0</b></div>
+    <div class="stat"><span>Operaciones hoy</span><b id="sN">0</b></div>
+    <div class="stat"><span>Recargas hoy</span><b id="sIn">$0</b></div>
+    <div class="stat"><span>Retiros hoy</span><b id="sOut">$0</b></div>
+  </div>
+
+  <section class="card">
+    <h2>Atender a un cliente</h2>
+    <div class="tabs"><button id="tIn" class="on" type="button">Meter plata</button><button id="tOut" type="button">Sacar plata</button></div>
+    <form id="fOp" autocomplete="off">
+      <label for="oc">Celular del cliente</label><input id="oc" inputmode="numeric" maxlength="10" placeholder="3001234567">
+      <label for="ok">C&oacute;digo que le lleg&oacute; por WhatsApp</label><input id="ok" inputmode="numeric" maxlength="6" placeholder="123456">
+      <div id="gM"><label for="om">Efectivo que entrega el cliente (COP)</label><input id="om" inputmode="numeric" maxlength="8" placeholder="50000"></div>
+      <button id="bCheck" class="btn" type="submit">Verificar cliente</button>
+    </form>
+    <div id="box" class="confirm" hidden>
+      <h3>Confirma los datos</h3>
+      <dl><dt>Cliente</dt><dd id="cN"></dd><dt>Celular</dt><dd id="cP"></dd><dt>Monto</dt><dd id="cV"></dd><dt>T&uacute; haces</dt><dd id="cA"></dd></dl>
+      <div class="row"><button id="bNo" class="btn ghost" type="button">Cancelar</button><button id="bGo" class="btn" type="button">Confirmar</button></div>
+    </div>
+    <div id="mOp" class="msg" role="alert" hidden></div>
+    <div class="tip">Pide el c&oacute;digo al cliente en persona. Nunca lo recibas por chat o llamada, y revisa que el nombre coincida con su documento antes de confirmar.</div>
+  </section>
+
+  <section class="card">
+    <h2>&Uacute;ltimos movimientos</h2>
+    <div class="wrap"><table>
+      <thead><tr><th>Fecha</th><th>Tipo</th><th>Cliente</th><th class="n">Cupo</th></tr></thead>
+      <tbody id="tb"></tbody>
+    </table></div>
+    <div id="empty" class="empty">Todav&iacute;a no hay movimientos.</div>
+  </section>
+
+  <section class="card">
+    <h2>Mi cuenta</h2>
+    <p class="sub">Cambia la clave de tu punto.</p>
+    <form id="fCta">
+      <label for="c2k">Clave actual</label><input id="c2k" type="password" autocomplete="current-password" maxlength="100" required>
+      <label for="c2n">Clave nueva</label><input id="c2n" type="password" autocomplete="new-password" maxlength="64" required>
+      <label for="c2r">Repite la clave nueva</label><input id="c2r" type="password" autocomplete="new-password" maxlength="64" required>
+      <button class="btn ghost" type="submit">Cambiar clave</button>
+    </form>
+    <div id="mCta" class="msg" role="alert" hidden></div>
+  </section>
+</div>
+
+</main>
+<footer>ParcePay &middot; Portal de puntos autorizados &middot; La sesi&oacute;n se cierra sola tras 10 minutos sin actividad.</footer>
 <script>
-function $(i){return document.getElementById(i)}
-function peso(v){return "$"+Math.round(v).toLocaleString("es-CO")}
-function say(t,ok){var m=$("msg");m.className="msg "+(ok?"ok":"err");m.textContent=t}
-function tab(n){
-  $("t1").className=n==1?"on":"";$("t2").className=n==2?"on":"";
-  $("f1").className=n==1?"on":"";$("f2").className=n==2?"on":"";
-  $("msg").className="msg";
+"use strict";
+const $ = id => document.getElementById(id);
+const peso = v => "$" + Math.round(v).toLocaleString("es-CO");
+const IDLE_MS = 10 * 60 * 1000;
+const PASS_RE = /^(?=.*[A-Za-z])(?=.*\d).{8,64}$/;
+// La sesion vive solo en la memoria de la pagina: al recargar o cerrar, hay que entrar de nuevo.
+let token = "", idleT = null, lastAct = Date.now(), tipo = "in", pend = null;
+
+function say(id, text, ok) { const m = $(id); m.textContent = text || ""; m.className = "msg " + (ok ? "ok" : "err"); m.hidden = !text; }
+function view(v) { ["vLogin", "vClave", "vApp"].forEach(x => { $(x).hidden = x !== v; }); $("bOut").hidden = v === "vLogin"; }
+function touch() { lastAct = Date.now(); clearTimeout(idleT); if (token) idleT = setTimeout(() => logout("Sesi\u00f3n cerrada por inactividad."), IDLE_MS); }
+
+async function api(path, body) {
+  try {
+    const r = await fetch("/api/" + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ t: token }, body || {})) });
+    const j = await r.json();
+    if (r.status === 401 && token) logout("Tu sesi\u00f3n venci\u00f3. Entra de nuevo.");
+    return j;
+  } catch (e) { return { error: "No hay conexi\u00f3n con el servidor de ParcePay." }; }
 }
-$("t1").onclick=function(){tab(1)};$("t2").onclick=function(){tab(2)};
-["p1","c1","m1","p2","c2"].forEach(function(i){$(i).oninput=function(){this.value=this.value.replace(/\D/g,"")}});
-function post(url,body,btn,done){
-  btn.disabled=true;
-  fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
-   .then(function(r){return r.json()})
-   .then(function(r){btn.disabled=false;if(r.error)say(r.error,false);else done(r)})
-   .catch(function(){btn.disabled=false;say("No hay conexi\u00f3n con el servidor de ParcePay.",false)});
+
+function logout(msg) {
+  if (token) api("punto/logout");
+  token = ""; pend = null; clearTimeout(idleT);
+  document.querySelectorAll("input").forEach(i => { i.value = ""; });
+  $("box").hidden = true; $("fOp").hidden = false;
+  ["mClave", "mOp", "mCta"].forEach(i => say(i, ""));
+  setTab("in"); view("vLogin"); say("mLogin", msg || "", false);
 }
-$("f1").onsubmit=function(e){
-  e.preventDefault();
-  post("/api/web/deposit",{p:$("p1").value,c:$("c1").value,m:$("m1").value},this.querySelector(".go"),function(r){
-    say("Listo. Se metieron "+peso(r.v)+" a la cuenta de "+r.n+".",true);$("c1").value="";$("m1").value="";
+
+function render(j) {
+  $("pName").textContent = j.nombre;
+  $("sCupo").textContent = peso(j.saldo); $("sN").textContent = j.hoy.n;
+  $("sIn").textContent = peso(j.hoy.i); $("sOut").textContent = peso(j.hoy.o);
+  const tb = $("tb"); tb.textContent = ""; $("empty").hidden = j.movs.length > 0;
+  j.movs.forEach(m => {
+    const tr = document.createElement("tr");
+    [new Date(m.f).toLocaleString("es-CO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }),
+     m.t === "in" ? "Recarga" : m.t === "out" ? "Retiro" : "Ajuste de cupo", m.c || "\u2014"].forEach(t => {
+      const td = document.createElement("td"); td.textContent = t; tr.appendChild(td);
+    });
+    const ef = m.t === "in" ? -m.v : m.v, td = document.createElement("td");
+    td.className = "n " + (ef > 0 ? "up" : "down"); td.textContent = (ef > 0 ? "+" : "\u2212") + peso(Math.abs(ef));
+    tr.appendChild(td); tb.appendChild(tr);
   });
-};
-$("f2").onsubmit=function(e){
-  e.preventDefault();
-  post("/api/web/withdraw",{p:$("p2").value,c:$("c2").value},this.querySelector(".go"),function(r){
-    say("Entrega "+peso(r.v)+" a "+r.n+".",true);$("c2").value="";
+}
+
+async function refresh() {
+  const j = await api("punto/me");
+  if (j.error) return;
+  if (j.cambiar) return view("vClave");
+  render(j); view("vApp");
+}
+
+$("fLogin").addEventListener("submit", async e => {
+  e.preventDefault(); say("mLogin", "");
+  const b = $("bLogin"); b.disabled = true;
+  const j = await api("punto/login", { u: $("u").value.trim(), k: $("k").value });
+  b.disabled = false; $("k").value = "";
+  if (j.error) return say("mLogin", j.error, false);
+  token = j.token; touch(); await refresh();
+});
+$("bOut").addEventListener("click", () => logout("Cerraste sesi\u00f3n."));
+
+function setTab(t) {
+  tipo = t; $("tIn").className = t === "in" ? "on" : ""; $("tOut").className = t === "out" ? "on" : "";
+  $("gM").hidden = t === "out"; $("bCheck").textContent = "Verificar cliente"; endOp(); say("mOp", "");
+}
+function endOp() { pend = null; $("box").hidden = true; $("fOp").hidden = false; ["oc", "ok", "om"].forEach(i => { $(i).value = ""; }); }
+$("tIn").addEventListener("click", () => setTab("in")); $("tOut").addEventListener("click", () => setTab("out"));
+["oc", "ok", "om"].forEach(i => $(i).addEventListener("input", function () { this.value = this.value.replace(/\D/g, ""); }));
+
+// Paso 1: verificar quien es el cliente (no gasta el codigo)
+$("fOp").addEventListener("submit", async e => {
+  e.preventDefault(); say("mOp", "");
+  const p = $("oc").value, c = $("ok").value, m = Number($("om").value);
+  if (!/^3\d{9}$/.test(p)) return say("mOp", "El celular debe tener 10 n\u00fameros y empezar por 3.", false);
+  if (!/^\d{6}$/.test(c)) return say("mOp", "El c\u00f3digo tiene 6 n\u00fameros.", false);
+  if (tipo === "in" && !(m >= 1 && m <= 10000000)) return say("mOp", "El monto debe estar entre $1 y $10.000.000.", false);
+  const b = $("bCheck"); b.disabled = true;
+  const j = await api("punto/check", { p, c, tipo });
+  b.disabled = false;
+  if (j.error) return say("mOp", j.error, false);
+  const v = tipo === "in" ? m : j.v;
+  pend = { p, c, tipo, m: v };
+  $("cN").textContent = j.n; $("cP").textContent = j.p; $("cV").textContent = peso(v);
+  $("cA").textContent = tipo === "in" ? "Recibes efectivo" : "Entregas efectivo";
+  $("fOp").hidden = true; $("box").hidden = false;
+});
+
+// Paso 2: confirmar
+$("bNo").addEventListener("click", () => { endOp(); say("mOp", ""); });
+$("bGo").addEventListener("click", async () => {
+  if (!pend) return;
+  const x = pend, b = $("bGo"), n = $("bNo"); b.disabled = true; n.disabled = true;
+  const j = await api(x.tipo === "in" ? "punto/deposit" : "punto/withdraw", { p: x.p, c: x.c, m: x.m });
+  b.disabled = false; n.disabled = false; endOp();
+  if (!j.error) say("mOp", x.tipo === "in" ? "Listo: se metieron " + peso(j.v) + " a la cuenta de " + j.n + "." : "Listo: entrega " + peso(j.v) + " en efectivo a " + j.n + ".", true);
+  else say("mOp", j.error + " Revisa los movimientos antes de repetir la operaci\u00f3n.", false);
+  if (token) refresh();
+});
+
+function bindPass(form, ids, msg, first) {
+  $(form).addEventListener("submit", async e => {
+    e.preventDefault(); say(msg, "");
+    const k = $(ids[0]).value, n = $(ids[1]).value, r = $(ids[2]).value;
+    if (!PASS_RE.test(n)) return say(msg, "La clave nueva debe tener m\u00ednimo 8 caracteres, con letras y n\u00fameros.", false);
+    if (n !== r) return say(msg, "Las claves nuevas no coinciden.", false);
+    const j = await api("punto/clave", { k, nk: n });
+    ids.forEach(i => { $(i).value = ""; });
+    if (j.error) return say(msg, j.error, false);
+    token = j.token; touch();
+    if (first) await refresh(); else say(msg, "Clave cambiada.", true);
   });
-};
+}
+bindPass("fClave", ["c1k", "c1n", "c1r"], "mClave", true);
+bindPass("fCta", ["c2k", "c2n", "c2r"], "mCta", false);
+
+["pointerdown", "keydown", "touchstart"].forEach(ev => document.addEventListener(ev, () => { if (token) touch(); }, { passive: true }));
+document.addEventListener("visibilitychange", () => { if (!document.hidden && token && Date.now() - lastAct > IDLE_MS) logout("Sesi\u00f3n cerrada por inactividad."); });
+view("vLogin");
 </script></body></html>

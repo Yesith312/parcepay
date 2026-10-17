@@ -27,3 +27,12 @@ SEGURIDAD
   sin ella no se pueden leer los datos cifrados ni los respaldos.
 - Comandos de administrador (desbloquear, eliminar, respaldo) usan ADMIN_KEY, nunca BOT_KEY.
 - La base gratis de Render se borra a los 30 dias y no tiene copias: pasa a un plan pago o haz respaldos con respaldo.sh.
+
+PUNTOS DE RECARGA (cajeros con cuenta)
+- La web (https://TU-APP.onrender.com) es el portal de los puntos: entran con usuario y clave, nunca el cliente.
+- Crear un punto:  bash ~/punto.sh crear usuario "Nombre del punto"   (muestra la clave temporal una sola vez)
+- Darle cupo:      bash ~/punto.sh cupo usuario 500000
+- Meter plata: el cliente pide el codigo en la app (le llega por WhatsApp), se lo da al cajero en persona; el cajero
+  escribe celular + codigo + efectivo recibido, verifica el nombre y confirma. El monto sale del cupo del punto.
+- Sacar plata: el cliente elige el monto en la app y recibe el codigo; el cajero lo verifica, entrega el efectivo y el
+  monto entra a su cupo.

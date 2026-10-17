@@ -38,8 +38,8 @@ class CodeScreen extends Screen {
         }));
         p.addView(Ui.tv(deposit ? "Meter plata" : "Sacar plata", 24, Theme.INK, true));
         TextView s = Ui.tv(deposit
-                ? "Entra a la web de ParcePay y escribe estos datos."
-                : "Escribe estos datos en el cajero de la web para sacar " + Session.fmt(amount) + ".", 15, Theme.MUT, false);
+                ? "Ve a un punto ParcePay y dale al cajero tu n\u00famero y este c\u00f3digo."
+                : "Ve a un punto ParcePay, dale al cajero tu n\u00famero y este c\u00f3digo y recibe " + Session.fmt(amount) + " en efectivo.", 15, Theme.MUT, false);
         s.setPadding(0, Ui.dp(4), 0, Ui.dp(18));
         p.addView(s);
 

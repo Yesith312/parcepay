@@ -63,9 +63,29 @@ async function auth(d) {
   if (sig.length !== t[1].length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(t[1]))) return null;
   let x;
   try { x = JSON.parse(Buffer.from(t[0], "base64url").toString()); } catch (e) { return null; }
-  if (!(x.exp > Date.now())) return null;
+  if (x.k || !(x.exp > Date.now())) return null;
   const r = (await pool.query("select tv from users where phone=$1", [x.p])).rows[0];
   return r && r.tv === x.v ? x.p : null;
+}
+
+// Sesion de los puntos de recarga (cajeros): token aparte, dura 1 hora
+const TOKEN_PT_MS = 3600e3;
+async function signPunto(id) {
+  const r = (await pool.query("select tv from puntos where id=$1", [id])).rows[0];
+  const body = Buffer.from(JSON.stringify({ p: id, k: "pt", v: r ? r.tv : 0, exp: Date.now() + TOKEN_PT_MS })).toString("base64url");
+  return body + "." + hmac(body);
+}
+// Devuelve la fila del punto si el token es valido, el punto esta activo y la version coincide
+async function authPunto(d) {
+  const t = String(d.t || "").split(".");
+  if (t.length !== 2) return null;
+  const sig = hmac(t[0]);
+  if (sig.length !== t[1].length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(t[1]))) return null;
+  let x;
+  try { x = JSON.parse(Buffer.from(t[0], "base64url").toString()); } catch (e) { return null; }
+  if (x.k !== "pt" || !(x.exp > Date.now())) return null;
+  const r = (await pool.query("select id, nombre, saldo, activo, cambiar, tv from puntos where id=$1", [x.p])).rows[0];
+  return r && r.activo && r.tv === x.v ? r : null;
 }
 
 // Limite de intentos fallidos (en memoria)
@@ -123,6 +143,15 @@ async function init() {
     create table if not exists audit(
       id bigserial primary key, at timestamptz not null default now(), phone text, ev text not null, ip text);
     create index if not exists audit_phone on audit(phone, id desc);
+    create table if not exists puntos(
+      id text primary key, nombre text not null, salt text not null, hash text not null, hv int not null default 2,
+      saldo bigint not null default 0 check (saldo >= 0), activo boolean not null default true,
+      intentos int not null default 0, bloqueado boolean not null default false,
+      cambiar boolean not null default true, tv int not null default 0, created_at timestamptz not null default now());
+    create table if not exists punto_movs(
+      id bigserial primary key, punto text not null references puntos(id), tipo text not null,
+      monto bigint not null, cliente text, saldo_despues bigint, created_at timestamptz not null default now());
+    create index if not exists punto_movs_punto on punto_movs(punto, id desc);
   `);
   await migratePII();
 }
@@ -217,6 +246,51 @@ async function giveCode(p, tipo, monto, msg) {
   const code = await setCode(p, tipo, monto);
   await queueWA(p, msg(code));
   return { wa: true };
+}
+
+// ---------- puntos de recarga ----------
+const MUSTCHANGE = [403, { cambiar: true, error: "Debes cambiar tu clave antes de operar." }];
+const PASS_RE = /^(?=.*[A-Za-z])(?=.*\d).{8,64}$/;
+function tempPass() {
+  const L = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz", N = "23456789", pick = x => x[crypto.randomInt(x.length)];
+  const a = [];
+  for (let i = 0; i < 8; i++) a.push(pick(L));
+  for (let i = 0; i < 4; i++) a.push(pick(N));
+  for (let i = a.length - 1; i > 0; i--) { const j = crypto.randomInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; }
+  return a.join("");
+}
+// Verifica usuario + clave del punto. Mismo mensaje exista o no el usuario. 5 fallos = cuenta bloqueada (la desbloquea el administrador).
+async function puntoVerify(id, k, ip) {
+  if (locked("i:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
+  const BAD = [400, { error: "Usuario o clave incorrectos." }];
+  if (!/^[a-z0-9_-]{3,24}$/.test(id) || k.length < 1 || k.length > 100) return BAD;
+  const u = (await pool.query("select hash, salt, activo, bloqueado, intentos from puntos where id=$1", [id])).rows[0];
+  if (!u) { fail("i:" + ip); await pinHash(k, "00".repeat(16)); return BAD; }
+  if (u.bloqueado) return [423, { locked: true, error: "Esta cuenta est\u00e1 bloqueada. Contacta al administrador de ParcePay." }];
+  if (!u.activo) return [403, { error: "Esta cuenta est\u00e1 desactivada. Contacta al administrador de ParcePay." }];
+  const ok = crypto.timingSafeEqual(Buffer.from(await pinHash(k, u.salt)), Buffer.from(u.hash));
+  if (ok) {
+    if (u.intentos > 0) await pool.query("update puntos set intentos=0 where id=$1", [id]);
+    return null;
+  }
+  fail("i:" + ip);
+  const r = (await pool.query(
+    "update puntos set intentos = intentos + 1, bloqueado = (intentos + 1 >= $2), tv = tv + (case when intentos + 1 >= $2 then 1 else 0 end) where id=$1 returning bloqueado",
+    [id, MAX_TRIES])).rows[0];
+  audit(r.bloqueado ? "punto_bloqueado" : "punto_clave_incorrecta", id, ip);
+  if (r.bloqueado) return [423, { locked: true, error: "Fallaste 5 veces y la cuenta se bloque\u00f3. Contacta al administrador de ParcePay." }];
+  return BAD;
+}
+async function puntoView(id) {
+  const u = (await pool.query("select id, nombre, saldo, cambiar from puntos where id=$1", [id])).rows[0];
+  const m = (await pool.query("select tipo, monto, cliente, (extract(epoch from created_at)*1000)::bigint as f from punto_movs where punto=$1 order by id desc limit 20", [id])).rows;
+  const t = (await pool.query(
+    `select count(*)::int as n, coalesce(sum(case when tipo='in' then monto end),0) as i, coalesce(sum(case when tipo='out' then monto end),0) as o
+       from punto_movs where punto=$1 and tipo in ('in','out')
+        and created_at >= (date_trunc('day', now() at time zone 'America/Bogota') at time zone 'America/Bogota')`, [id])).rows[0];
+  return { id: u.id, nombre: u.nombre, saldo: Number(u.saldo), cambiar: u.cambiar,
+    hoy: { n: t.n, i: Number(t.i), o: Number(t.o) },
+    movs: m.map(x => ({ t: x.tipo, v: Number(x.monto), c: x.cliente ? "***" + x.cliente.slice(-4) : "", f: Number(x.f) })) };
 }
 
 const BAD_CODE = [400, { error: "N\u00famero o c\u00f3digo incorrecto, o el c\u00f3digo ya venci\u00f3." }];
@@ -443,6 +517,7 @@ const H = {
       await db.query("delete from codes where phone=$1", [p]);
       await db.query("delete from outbox where phone=$1", [p]);
       await db.query("delete from audit where phone=$1", [p]);
+      await db.query("update punto_movs set cliente=null where cliente=$1", [p]);
       await db.query("delete from users where phone=$1", [p]);
     });
     audit("admin_cuenta_eliminada", null, ip);
@@ -460,14 +535,16 @@ const H = {
     const g = adminGate(d, ip); if (g) return g;
     const users = (await pool.query("select * from users order by created_at")).rows;
     const movs = (await pool.query("select * from movs order by id")).rows;
+    const puntos = (await pool.query("select * from puntos order by created_at")).rows;
+    const punto_movs = (await pool.query("select * from punto_movs order by id")).rows;
     audit("admin_respaldo", null, ip);
-    return [200, { at: new Date().toISOString(), users, movs }];
+    return [200, { at: new Date().toISOString(), users, movs, puntos, punto_movs }];
   },
 
   // La app pide un codigo para RECIBIR plata (se usa en la web)
   "/api/deposit-code": async d => {
     const p = await auth(d); if (!p) return NOAUTH;
-    const g = await giveCode(p, "in", 0, c => "ParcePay: tu c\u00f3digo para meter plata es " + c + ". Escr\u00edbelo en la web de recarga. Vence en 10 minutos. No lo compartas con nadie.");
+    const g = await giveCode(p, "in", 0, c => "ParcePay: tu c\u00f3digo para meter plata es " + c + ". D\u00e1selo solo al cajero de un punto ParcePay, en persona. Vence en 10 minutos. Nadie m\u00e1s debe pedirtelo.");
     if (!g) return NOBOT;
     return [200, Object.assign({ phone: p, ttl: CODE_TTL }, g)];
   },
@@ -480,47 +557,174 @@ const H = {
     const u = (await pool.query("select saldo from users where phone=$1", [p])).rows[0];
     if (!u) return NOAUTH;
     if (v > Number(u.saldo)) return [400, { error: "No te alcanza. Disponible: " + money(Number(u.saldo)) }];
-    const g = await giveCode(p, "out", v, c => "ParcePay: tu c\u00f3digo para sacar " + money(v) + " en el cajero es " + c + ". Vence en 10 minutos. No lo compartas con nadie.");
+    const g = await giveCode(p, "out", v, c => "ParcePay: tu c\u00f3digo para sacar " + money(v) + " en un punto ParcePay es " + c + ". D\u00e1selo solo al cajero, en persona. Vence en 10 minutos. Nadie m\u00e1s debe pedirtelo.");
     if (!g) return NOBOT;
     return [200, Object.assign({ phone: p, ttl: CODE_TTL, v }, g)];
   },
 
-  // Web: meter plata con celular + codigo + monto
-  "/api/web/deposit": async (d, ip) => {
+  // ======================= PUNTOS DE RECARGA (cajeros con cuenta) =======================
+  // Cada punto tiene un CUPO: al meter plata a un cliente se le descuenta del cupo; al entregar un retiro, se le suma.
+  // Asi nadie puede crear dinero de la nada.
+  "/api/punto/login": async (d, ip) => {
+    const id = String(d.u || "").trim().toLowerCase(), k = String(d.k || "");
+    const bad = await puntoVerify(id, k, ip); if (bad) return bad;
+    audit("punto_login", id, ip);
+    const u = (await pool.query("select cambiar from puntos where id=$1", [id])).rows[0];
+    return [200, { token: await signPunto(id), cambiar: u.cambiar }];
+  },
+
+  "/api/punto/me": async d => {
+    const pt = await authPunto(d); if (!pt) return NOAUTH;
+    return [200, await puntoView(pt.id)];
+  },
+
+  "/api/punto/logout": async d => {
+    const pt = await authPunto(d);
+    if (pt) await pool.query("update puntos set tv = tv + 1 where id=$1", [pt.id]);
+    return [200, { ok: true }];
+  },
+
+  "/api/punto/clave": async (d, ip) => {
+    const pt = await authPunto(d); if (!pt) return NOAUTH;
+    const k = String(d.k || ""), nk = String(d.nk || "");
+    if (!PASS_RE.test(nk)) return [400, { error: "La clave nueva debe tener m\u00ednimo 8 caracteres, con letras y n\u00fameros." }];
+    if (nk === k) return [400, { error: "La clave nueva debe ser distinta a la actual." }];
+    const bad = await puntoVerify(pt.id, k, ip);
+    if (bad) return bad[0] === 400 ? [400, { error: "Tu clave actual no es correcta." }] : bad;
+    const salt = crypto.randomBytes(16).toString("hex");
+    await pool.query("update puntos set salt=$2, hash=$3, hv=2, cambiar=false, tv=tv+1 where id=$1", [pt.id, salt, await pinHash(nk, salt)]);
+    audit("punto_clave_cambiada", pt.id, ip);
+    return [200, { ok: true, token: await signPunto(pt.id) }];
+  },
+
+  // Paso 1: el cajero escribe celular + codigo; se le muestra QUIEN es (y el monto del retiro) sin gastar el codigo
+  "/api/punto/check": async (d, ip) => {
+    const pt = await authPunto(d); if (!pt) return NOAUTH;
+    if (pt.cambiar) return MUSTCHANGE;
+    const p = String(d.p || ""), c = String(d.c || ""), tipo = d.tipo === "out" ? "out" : "in";
+    if (rate("pt:" + pt.id, 40, 60000)) return [429, { error: "Demasiadas operaciones seguidas. Espera un momento." }];
+    if (locked("w:" + p) || locked("i:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
+    if (!phoneOk(p) || !/^\d{6}$/.test(c)) { fail("i:" + ip); return BAD_CODE; }
+    const e = (await pool.query(
+      "select c.monto, u.nombres, u.apellidos, u.saldo from codes c join users u on u.phone = c.phone where c.phone=$1 and c.tipo=$2 and c.code=$3 and c.expires_at > now()",
+      [p, tipo, c])).rows[0];
+    if (!e) { fail("w:" + p); fail("i:" + ip); return BAD_CODE; }
+    if (tipo === "out" && Number(e.saldo) < Number(e.monto)) return [400, { error: "La cuenta ya no tiene saldo suficiente." }];
+    const nombre = dec(e.nombres).split(" ")[0] + " " + dec(e.apellidos).slice(0, 1) + ".";
+    return [200, { n: nombre, p: "***" + p.slice(-4), v: tipo === "out" ? Number(e.monto) : null }];
+  },
+
+  // Paso 2a: meter plata. El cliente entrega efectivo; sale del cupo del punto y entra a su cuenta.
+  "/api/punto/deposit": async (d, ip) => {
+    const pt = await authPunto(d); if (!pt) return NOAUTH;
+    if (pt.cambiar) return MUSTCHANGE;
     const p = String(d.p || ""), c = String(d.c || ""), m = Math.floor(Number(d.m));
+    if (rate("pt:" + pt.id, 40, 60000)) return [429, { error: "Demasiadas operaciones seguidas. Espera un momento." }];
     if (locked("w:" + p) || locked("i:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
     if (!(m > 0 && m <= 10000000)) return [400, { error: "El monto debe estar entre $1 y $10.000.000." }];
     const r = await tx(async db => {
+      const a = (await db.query("select saldo from puntos where id=$1 for update", [pt.id])).rows[0];
       const e = (await db.query("select code from codes where phone=$1 and tipo='in' and expires_at > now() for update", [p])).rows[0];
-      if (!phoneOk(p) || !e || e.code !== c) return null;
-      await db.query("update users set saldo = saldo + $2 where phone=$1", [p, m]);
-      await db.query("insert into movs(phone, tipo, monto, detalle) values($1,'in',$2,'Recarga en la web')", [p, m]);
-      await db.query("delete from codes where phone=$1 and tipo='in'", [p]);
-      return dec((await db.query("select nombres from users where phone=$1", [p])).rows[0].nombres).split(" ")[0];
-    });
-    if (!r) { fail("w:" + p); fail("i:" + ip); return BAD_CODE; }
-    clear("w:" + p); clear("i:" + ip);
-    return [200, { ok: true, v: m, n: r }];
-  },
-
-  // Web (cajero): sacar plata con celular + codigo
-  "/api/web/withdraw": async (d, ip) => {
-    const p = String(d.p || ""), c = String(d.c || "");
-    if (locked("w:" + p) || locked("i:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
-    const r = await tx(async db => {
-      const e = (await db.query("select code, monto from codes where phone=$1 and tipo='out' and expires_at > now() for update", [p])).rows[0];
       if (!phoneOk(p) || !e || e.code !== c) return { bad: true };
-      const v = Number(e.monto);
-      const u = await db.query("update users set saldo = saldo - $2 where phone=$1 and saldo >= $2 returning nombres", [p, v]);
-      if (u.rowCount === 0) return { err: "La cuenta ya no tiene saldo suficiente." };
-      await db.query("insert into movs(phone, tipo, monto, detalle) values($1,'out',$2,'Retiro en cajero web')", [p, v]);
-      await db.query("delete from codes where phone=$1 and tipo='out'", [p]);
-      return { v, n: dec(u.rows[0].nombres).split(" ")[0] };
+      if (Number(a.saldo) < m) return { err: "Tu punto no tiene cupo suficiente. Cupo disponible: " + money(Number(a.saldo)) + "." };
+      const cupo = (await db.query("update puntos set saldo = saldo - $2 where id=$1 returning saldo", [pt.id, m])).rows[0].saldo;
+      const u = await db.query("update users set saldo = saldo + $2 where phone=$1 returning nombres, saldo", [p, m]);
+      await db.query("insert into movs(phone, tipo, monto, detalle) values($1,'in',$2,$3)", [p, m, "Recarga en " + pt.nombre]);
+      await db.query("insert into punto_movs(punto, tipo, monto, cliente, saldo_despues) values($1,'in',$2,$3,$4)", [pt.id, m, p, cupo]);
+      await db.query("delete from codes where phone=$1 and tipo='in'", [p]);
+      return { n: dec(u.rows[0].nombres).split(" ")[0], s: Number(u.rows[0].saldo), cupo: Number(cupo) };
     });
     if (r.bad) { fail("w:" + p); fail("i:" + ip); return BAD_CODE; }
     if (r.err) return [400, { error: r.err }];
     clear("w:" + p); clear("i:" + ip);
-    return [200, { ok: true, v: r.v, n: r.n }];
+    audit("punto_deposito", pt.id, ip);
+    alertWA(p, "ParcePay: se metieron " + money(m) + " a tu cuenta en " + pt.nombre + ". Tu saldo ahora es " + money(r.s) + ". Si no fuiste t\u00fa, contacta a soporte de inmediato.");
+    return [200, { ok: true, v: m, n: r.n, cupo: r.cupo }];
+  },
+
+  // Paso 2b: retiro. Sale de la cuenta del cliente; el cajero entrega el efectivo y el monto entra a su cupo.
+  "/api/punto/withdraw": async (d, ip) => {
+    const pt = await authPunto(d); if (!pt) return NOAUTH;
+    if (pt.cambiar) return MUSTCHANGE;
+    const p = String(d.p || ""), c = String(d.c || "");
+    if (rate("pt:" + pt.id, 40, 60000)) return [429, { error: "Demasiadas operaciones seguidas. Espera un momento." }];
+    if (locked("w:" + p) || locked("i:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
+    const r = await tx(async db => {
+      await db.query("select 1 from puntos where id=$1 for update", [pt.id]);
+      const e = (await db.query("select code, monto from codes where phone=$1 and tipo='out' and expires_at > now() for update", [p])).rows[0];
+      if (!phoneOk(p) || !e || e.code !== c) return { bad: true };
+      const v = Number(e.monto);
+      const u = await db.query("update users set saldo = saldo - $2 where phone=$1 and saldo >= $2 returning nombres, saldo", [p, v]);
+      if (u.rowCount === 0) return { err: "La cuenta ya no tiene saldo suficiente." };
+      const cupo = (await db.query("update puntos set saldo = saldo + $2 where id=$1 returning saldo", [pt.id, v])).rows[0].saldo;
+      await db.query("insert into movs(phone, tipo, monto, detalle) values($1,'out',$2,$3)", [p, v, "Retiro en " + pt.nombre]);
+      await db.query("insert into punto_movs(punto, tipo, monto, cliente, saldo_despues) values($1,'out',$2,$3,$4)", [pt.id, v, p, cupo]);
+      await db.query("delete from codes where phone=$1 and tipo='out'", [p]);
+      return { v, n: dec(u.rows[0].nombres).split(" ")[0], s: Number(u.rows[0].saldo), cupo: Number(cupo) };
+    });
+    if (r.bad) { fail("w:" + p); fail("i:" + ip); return BAD_CODE; }
+    if (r.err) return [400, { error: r.err }];
+    clear("w:" + p); clear("i:" + ip);
+    audit("punto_retiro", pt.id, ip);
+    alertWA(p, "ParcePay: retiraste " + money(r.v) + " en " + pt.nombre + ". Tu saldo ahora es " + money(r.s) + ". Si no fuiste t\u00fa, contacta a soporte de inmediato.");
+    return [200, { ok: true, v: r.v, n: r.n, cupo: r.cupo }];
+  },
+
+  // ---------- administracion de puntos (ADMIN_KEY) ----------
+  "/api/admin/punto-crear": async (d, ip) => {
+    const g = adminGate(d, ip); if (g) return g;
+    const id = String(d.u || "").trim().toLowerCase(), nombre = String(d.nombre || "").trim().slice(0, 40);
+    if (!/^[a-z0-9_-]{3,24}$/.test(id) || nombre.length < 2) return [400, { error: "Usuario: 3 a 24 letras, numeros, _ o -. Nombre: minimo 2 letras." }];
+    const temp = tempPass(), salt = crypto.randomBytes(16).toString("hex");
+    try {
+      await pool.query("insert into puntos(id, nombre, salt, hash, hv, cambiar) values($1,$2,$3,$4,2,true)", [id, nombre, salt, await pinHash(temp, salt)]);
+    } catch (e) {
+      if (e.code === "23505") return [400, { error: "Ese usuario ya existe." }];
+      throw e;
+    }
+    audit("admin_punto_creado", id, ip);
+    return [200, { u: id, nombre, clave_temporal: temp }];
+  },
+
+  // Suma (o resta, con numero negativo) cupo a un punto
+  "/api/admin/punto-cupo": async (d, ip) => {
+    const g = adminGate(d, ip); if (g) return g;
+    const id = String(d.u || "").trim().toLowerCase(), v = Math.trunc(Number(d.v));
+    if (!Number.isFinite(v) || v === 0 || Math.abs(v) > 1e9) return [400, { error: "Valor invalido." }];
+    const r = await tx(async db => {
+      const u = await db.query("update puntos set saldo = saldo + $2 where id=$1 and saldo + $2 >= 0 returning saldo", [id, v]);
+      if (u.rowCount === 0) return null;
+      await db.query("insert into punto_movs(punto, tipo, monto, saldo_despues) values($1,'cupo',$2,$3)", [id, v, u.rows[0].saldo]);
+      return Number(u.rows[0].saldo);
+    });
+    if (r === null) return [400, { error: "Ese punto no existe, o el cupo quedaria negativo." }];
+    audit("admin_punto_cupo", id, ip);
+    return [200, { u: id, cupo: r }];
+  },
+
+  // Clave temporal nueva (tambien desbloquea y cierra sus sesiones)
+  "/api/admin/punto-clave": async (d, ip) => {
+    const g = adminGate(d, ip); if (g) return g;
+    const id = String(d.u || "").trim().toLowerCase(), temp = tempPass(), salt = crypto.randomBytes(16).toString("hex");
+    const r = await pool.query("update puntos set salt=$2, hash=$3, hv=2, cambiar=true, intentos=0, bloqueado=false, tv=tv+1 where id=$1", [id, salt, await pinHash(temp, salt)]);
+    if (!r.rowCount) return [400, { error: "Ese punto no existe." }];
+    audit("admin_punto_clave", id, ip);
+    return [200, { u: id, clave_temporal: temp }];
+  },
+
+  "/api/admin/punto-estado": async (d, ip) => {
+    const g = adminGate(d, ip); if (g) return g;
+    const id = String(d.u || "").trim().toLowerCase(), on = d.activo === true;
+    const r = await pool.query("update puntos set activo=$2, tv=tv+1 where id=$1", [id, on]);
+    if (!r.rowCount) return [400, { error: "Ese punto no existe." }];
+    audit(on ? "admin_punto_activado" : "admin_punto_desactivado", id, ip);
+    return [200, { u: id, activo: on }];
+  },
+
+  "/api/admin/punto-lista": async (d, ip) => {
+    const g = adminGate(d, ip); if (g) return g;
+    const r = await pool.query("select id, nombre, saldo, activo, bloqueado, cambiar from puntos order by id");
+    return [200, { puntos: r.rows.map(x => ({ u: x.id, nombre: x.nombre, cupo: Number(x.saldo), activo: x.activo, bloqueado: x.bloqueado, clave_temporal: x.cambiar })) }];
   }
 };
 
