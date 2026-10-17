@@ -18,6 +18,9 @@ class RegisterScreen extends Screen {
     EditText etCC, etN, etA, etP;
     TextView tvDate, err;
     String birth = "";
+    /** Debe ser igual a LEGAL_VERSION de server.js: es la version de los textos legales que acepta la persona. */
+    static final String LEGAL_V = "2026-10-17";
+    android.widget.CheckBox chk;
 
     RegisterScreen(MainActivity a) { super(a); }
 
@@ -54,6 +57,29 @@ class RegisterScreen extends Screen {
         p.addView(Ui.label("Celular"));
         etP = Ui.edit("3001234567", InputType.TYPE_CLASS_NUMBER, 10);
         p.addView(etP);
+        chk = new android.widget.CheckBox(a);
+        chk.setText("Acepto los T\u00e9rminos y Condiciones y autorizo el tratamiento de mis datos personales seg\u00fan la Pol\u00edtica de Privacidad.");
+        chk.setTextSize(14);
+        chk.setTextColor(Theme.INK);
+        LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(-1, -2);
+        cl.topMargin = Ui.dp(16);
+        chk.setLayoutParams(cl);
+        p.addView(chk);
+        LinearLayout lk = new LinearLayout(a);
+        lk.setPadding(Ui.dp(8), Ui.dp(2), 0, 0);
+        TextView t1 = Ui.tv("Leer T\u00e9rminos", 14, Theme.BLUE, true);
+        t1.setPadding(0, Ui.dp(6), Ui.dp(22), Ui.dp(6));
+        t1.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { a.web("/terminos"); }
+        });
+        TextView t2 = Ui.tv("Leer Pol\u00edtica de Privacidad", 14, Theme.BLUE, true);
+        t2.setPadding(0, Ui.dp(6), 0, Ui.dp(6));
+        t2.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { a.web("/privacidad"); }
+        });
+        lk.addView(t1);
+        lk.addView(t2);
+        p.addView(lk);
         err = Ui.tv("", 14, Theme.RED, false);
         err.setPadding(0, Ui.dp(10), 0, Ui.dp(6));
         p.addView(err);
@@ -69,13 +95,17 @@ class RegisterScreen extends Screen {
 
     void pickDate() {
         Calendar c = Calendar.getInstance();
-        new DatePickerDialog(a, new DatePickerDialog.OnDateSetListener() {
+        DatePickerDialog dlg = new DatePickerDialog(a, new DatePickerDialog.OnDateSetListener() {
             public void onDateSet(DatePicker v, int y, int m, int d) {
                 birth = y + "-" + (m + 1 < 10 ? "0" : "") + (m + 1) + "-" + (d < 10 ? "0" : "") + d;
                 tvDate.setText(birth);
                 tvDate.setTextColor(Theme.INK);
             }
-        }, c.get(Calendar.YEAR) - 18, c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH)).show();
+        }, c.get(Calendar.YEAR) - 18, c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH));
+        Calendar mx = Calendar.getInstance();
+        mx.add(Calendar.YEAR, -18);
+        dlg.getDatePicker().setMaxDate(mx.getTimeInMillis()); // solo mayores de 18
+        dlg.show();
     }
 
     void submit() {
@@ -85,8 +115,9 @@ class RegisterScreen extends Screen {
         if (nom.length() == 0 || ape.length() == 0) { err.setText("Escribe tus nombres y apellidos."); return; }
         if (birth.length() == 0) { err.setText("Elige tu fecha de nacimiento."); return; }
         if (!Pattern.matches("3\\d{9}", cel)) { err.setText("El celular debe tener 10 n\u00fameros y empezar por 3."); return; }
+        if (!chk.isChecked()) { err.setText("Debes aceptar los T\u00e9rminos y la Pol\u00edtica de Privacidad para crear tu cuenta."); return; }
         err.setText("");
-        final JSONObject data = Api.obj("cc", cc, "n", nom, "a", ape, "f", birth, "p", cel);
+        final JSONObject data = Api.obj("cc", cc, "n", nom, "a", ape, "f", birth, "p", cel, "terms", Boolean.TRUE, "tv", LEGAL_V);
         Api.call(a, "exists", Api.obj("p", cel), new Api.Cb() {
             public void on(JSONObject r) {
                 if (r.has("error")) { err.setText(r.optString("error")); return; }

@@ -140,6 +140,8 @@ async function init() {
       tries int not null default 0, claimed_at timestamptz, created_at timestamptz not null default now());
     alter table users add column if not exists hv int not null default 1;
     alter table users add column if not exists tv int not null default 0;
+    alter table users add column if not exists acepto_at timestamptz;
+    alter table users add column if not exists acepto_v text;
     create table if not exists audit(
       id bigserial primary key, at timestamptz not null default now(), phone text, ev text not null, ip text);
     create index if not exists audit_phone on audit(phone, id desc);
@@ -248,6 +250,30 @@ async function giveCode(p, tipo, monto, msg) {
   return { wa: true };
 }
 
+// ---------- legal ----------
+// Version de los Terminos y la Politica que acepta quien crea cuenta. Si cambias los textos, sube esta fecha
+// (y la misma en RegisterScreen.java): asi se sabe que version acepto cada usuario.
+const LEGAL_VERSION = "2026-10-17";
+function adult(f) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(f);
+  if (!m) return false;
+  const y = +m[1], mo = +m[2], da = +m[3], dt = new Date(Date.UTC(y, mo - 1, da));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== da) return false; // fecha inexistente
+  const now = new Date();
+  let age = now.getUTCFullYear() - y;
+  if (now.getUTCMonth() + 1 < mo || (now.getUTCMonth() + 1 === mo && now.getUTCDate() < da)) age--;
+  return age >= 18 && age <= 120;
+}
+// Borra a un cliente de todas partes (la usan "Eliminar mi cuenta" y el comando de administrador)
+async function purgeUser(db, p) {
+  await db.query("delete from movs where phone=$1", [p]);
+  await db.query("delete from codes where phone=$1", [p]);
+  await db.query("delete from outbox where phone=$1", [p]);
+  await db.query("delete from audit where phone=$1", [p]);
+  await db.query("update punto_movs set cliente=null where cliente=$1", [p]);
+  await db.query("delete from users where phone=$1", [p]);
+}
+
 // ---------- puntos de recarga ----------
 const MUSTCHANGE = [403, { cambiar: true, error: "Debes cambiar tu clave antes de operar." }];
 const PASS_RE = /^(?=.*[A-Za-z])(?=.*\d).{8,64}$/;
@@ -308,6 +334,9 @@ const H = {
     const n = String(d.n || "").trim().slice(0, 60), a = String(d.a || "").trim().slice(0, 60), f = String(d.f || "").slice(0, 10);
     if (!phoneOk(p)) return [400, { error: "Celular inv\u00e1lido" }];
     if (!/^\d{6,10}$/.test(cc) || !n || !a || !f || !/^\d{4}$/.test(k)) return [400, { error: "Datos incompletos." }];
+    // Autorizacion previa, expresa e informada (Ley 1581): sin aceptar los textos vigentes no se crea la cuenta
+    if (d.terms !== true || String(d.tv || "") !== LEGAL_VERSION) return [400, { error: "Debes aceptar los T\u00e9rminos y la Pol\u00edtica de Privacidad. Si ya los aceptaste, actualiza la app." }];
+    if (!adult(f)) return [400, { error: "Debes ser mayor de 18 a\u00f1os para crear una cuenta." }];
     if (BOT_KEY) {
       // Con el bot activo, la cuenta solo se crea con el codigo que llego por WhatsApp
       const c = String(d.c || "");
@@ -320,8 +349,8 @@ const H = {
     const salt = crypto.randomBytes(16).toString("hex");
     try {
       // La cedula se guarda como huella (no en texto plano)
-      await pool.query("insert into users(phone, cc, nombres, apellidos, nacimiento, salt, hash, hv) values($1,$2,$3,$4,$5,$6,$7,2)",
-        [p, hmac("cc:" + cc), enc(n), enc(a), enc(f), salt, await pinHash(k, salt)]);
+      await pool.query("insert into users(phone, cc, nombres, apellidos, nacimiento, salt, hash, hv, acepto_at, acepto_v) values($1,$2,$3,$4,$5,$6,$7,2,now(),$8)",
+        [p, hmac("cc:" + cc), enc(n), enc(a), enc(f), salt, await pinHash(k, salt), LEGAL_VERSION]);
     } catch (e) {
       if (e.code === "23505") return [400, { error: "Ese n\u00famero ya tiene cuenta." }];
       throw e;
@@ -487,6 +516,34 @@ const H = {
     return [200, { ok: true }];
   },
 
+  // ---------- eliminar mi cuenta (derecho de supresion): clave + codigo por WhatsApp ----------
+  "/api/profile/delete-code": async (d, ip) => {
+    const p = await auth(d); if (!p) return NOAUTH;
+    const bad = await verifyPin(p, String(d.k || ""), ip); if (bad) return bad;
+    const recent = await pool.query("select 1 from codes where phone=$1 and tipo='del' and expires_at > now() + interval '" + (CODE_TTL - 60) + " seconds'", [p]);
+    if (recent.rowCount > 0) return [429, { error: "Ya te mandamos un c\u00f3digo. Espera un minuto para pedir otro." }];
+    const g = await giveCode(p, "del", 0, c => "ParcePay: tu c\u00f3digo para ELIMINAR tu cuenta es " + c + ". Si lo usas, tu cuenta y tu saldo se borran para siempre. Si no fuiste t\u00fa, no lo compartas y cambia tu clave. Vence en 10 minutos.");
+    if (!g) return NOBOT;
+    return [200, Object.assign({ ok: true }, g)];
+  },
+
+  "/api/profile/delete": async (d, ip) => {
+    const p = await auth(d); if (!p) return NOAUTH;
+    const c = String(d.c || "");
+    if (!/^\d{6}$/.test(c)) return BAD_CODE;
+    if (locked("w:" + p) || locked("i:" + ip)) return [429, { error: "Muchos intentos. Espera 1 minuto." }];
+    const ok = await tx(async db => {
+      const e = (await db.query("select code from codes where phone=$1 and tipo='del' and expires_at > now() for update", [p])).rows[0];
+      if (!e || e.code !== c) return false;
+      await purgeUser(db, p);
+      return true;
+    });
+    if (!ok) { fail("w:" + p); fail("i:" + ip); return BAD_CODE; }
+    audit("cuenta_eliminada", null, ip);
+    alertWA(p, "ParcePay: tu cuenta fue eliminada y tus datos se borraron. Si no fuiste t\u00fa, contacta a soporte de inmediato.");
+    return [200, { ok: true }];
+  },
+
   // Cerrar sesion: invalida el token (y cualquier otro de esa cuenta)
   "/api/logout": async d => {
     const p = await auth(d);
@@ -512,14 +569,7 @@ const H = {
     if (!u) return [400, { error: "Ese numero no tiene cuenta." }];
     const info = { nombre: dec(u.nombres) + " " + dec(u.apellidos), saldo: Number(u.saldo) };
     if (d.dry) return [200, Object.assign({ dry: true }, info)];
-    await tx(async db => {
-      await db.query("delete from movs where phone=$1", [p]);
-      await db.query("delete from codes where phone=$1", [p]);
-      await db.query("delete from outbox where phone=$1", [p]);
-      await db.query("delete from audit where phone=$1", [p]);
-      await db.query("update punto_movs set cliente=null where cliente=$1", [p]);
-      await db.query("delete from users where phone=$1", [p]);
-    });
+    await tx(db => purgeUser(db, p));
     audit("admin_cuenta_eliminada", null, ip);
     return [200, Object.assign({ ok: true }, info)];
   },
@@ -730,6 +780,96 @@ const H = {
 
 // ---------- servidor HTTP ----------
 // Pagina web: CSP con la huella de sus scripts/estilos (no se permite nada mas)
+// ---------- sitio publico ----------
+// Paginas en web/site/. Los datos del responsable salen de Render > Environment:
+//   LEGAL_NOMBRE, LEGAL_ID (CC o NIT), LEGAL_CIUDAD, LEGAL_CORREO y, opcional, SOPORTE_WHATSAPP.
+// Si falta alguno, la pagina muestra [PENDIENTE: NOMBRE] resaltado para que no pase desapercibido.
+const SITE_DIR = path.join(__dirname, "web", "site"), APK_FILE = path.join(__dirname, "web", "ParcePay.apk");
+const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+const fechaLarga = v => { const [y, m, d] = v.split("-").map(Number); return d + " de " + MESES[m - 1] + " de " + y; };
+const esc = t => String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const VARS = { VERSION: LEGAL_VERSION, FECHA: fechaLarga(LEGAL_VERSION) };
+["LEGAL_NOMBRE", "LEGAL_ID", "LEGAL_CIUDAD", "LEGAL_CORREO", "SOPORTE_WHATSAPP"].forEach(k => { VARS[k] = String(process.env[k] || "").trim(); });
+const TODO = k => '<mark class="todo">[PENDIENTE: ' + k + ']</mark>';
+// {{{X}}} = HTML ya armado por el servidor; {{X}} = texto (se escapa)
+const fill = (t, raw) => t.replace(/\{\{\{(\w+)\}\}\}/g, (_, k) => (raw[k] !== undefined ? raw[k] : ""))
+  .replace(/\{\{(\w+)\}\}/g, (_, k) => (VARS[k] ? esc(VARS[k]) : TODO(k)));
+const PAGE_LIST = {
+  "/": ["inicio.html", "ParcePay - Tu billetera digital", "Crea tu cuenta con tu celular, carga saldo en puntos autorizados y protege todo con tu clave y verificaci\u00f3n por WhatsApp."],
+  "/terminos": ["terminos.html", "T\u00e9rminos y Condiciones", "T\u00e9rminos y Condiciones de uso de ParcePay."],
+  "/privacidad": ["privacidad.html", "Pol\u00edtica de Privacidad", "Pol\u00edtica de Privacidad y Tratamiento de Datos Personales de ParcePay."],
+  "/eliminar-cuenta": ["eliminar-cuenta.html", "Eliminar mi cuenta", "C\u00f3mo eliminar tu cuenta de ParcePay y qu\u00e9 pasa con tus datos."]
+};
+const SITE_CSP = "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const LAYOUT = (title, desc, body) => `<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title} \u00b7 ParcePay</title><meta name="description" content="${desc}"><link rel="stylesheet" href="/site.css"></head>
+<body>
+<header class="top"><div class="wrap"><a class="brand" href="/">Parce<b>Pay</b></a>
+<nav><a href="/#como">C\u00f3mo funciona</a><a href="/#seguridad">Seguridad</a><a href="/#soporte">Soporte</a><a class="cta" href="/#descarga">Descargar</a></nav></div></header>
+<main>${body}</main>
+<footer><div class="wrap">
+<a href="/terminos">T\u00e9rminos y Condiciones</a><a href="/privacidad">Pol\u00edtica de Privacidad</a><a href="/eliminar-cuenta">Eliminar mi cuenta</a><a href="/puntos">Ingreso de puntos</a>
+<p>{{LEGAL_NOMBRE}} \u00b7 {{LEGAL_ID}} \u00b7 {{LEGAL_CIUDAD}}, Colombia \u00b7 {{{MAIL_LINK}}}</p>
+<p>ParcePay maneja saldo virtual y no es una entidad vigilada por la Superintendencia Financiera de Colombia.</p>
+</div></footer>
+<script src="/site.js"></script></body></html>`;
+let PAGES = {}, ASSETS = {}, apk = null, mailOk = false;
+function loadSite() {
+  const miss = ["LEGAL_NOMBRE", "LEGAL_ID", "LEGAL_CIUDAD", "LEGAL_CORREO"].filter(k => !VARS[k]);
+  if (miss.length) console.warn("AVISO: faltan datos legales en Render > Environment: " + miss.join(", ") + " (las paginas legales muestran [PENDIENTE])");
+  try {
+    const b = fs.readFileSync(APK_FILE);
+    apk = { size: b.length, sha: crypto.createHash("sha256").update(b).digest("hex"), fecha: fs.statSync(APK_FILE).mtime.toISOString().slice(0, 10) };
+  } catch (e) { apk = null; }
+  mailOk = /^[^\s@<>"']+@[^\s@<>"']+$/.test(VARS.LEGAL_CORREO);
+  const wa = VARS.SOPORTE_WHATSAPP.replace(/\D/g, "");
+  const raw = {
+    MAIL_LINK: mailOk ? '<a href="mailto:' + esc(VARS.LEGAL_CORREO) + '">' + esc(VARS.LEGAL_CORREO) + "</a>" : TODO("LEGAL_CORREO"),
+    WA_BLOCK: wa.length >= 10 ? '<p>WhatsApp: <a href="https://wa.me/' + wa + '">+' + wa + "</a></p>" : "",
+    APK: apk
+      ? '<a class="btn big" href="/ParcePay.apk" download>Descargar para Android</a><p class="fine">Publicada el ' + fechaLarga(apk.fecha) + " \u00b7 " +
+        (apk.size / 1048576).toFixed(1) + " MB<br>Huella SHA-256 del archivo:<br><code>" + apk.sha + "</code></p>"
+      : '<span class="btn big off">Descarga disponible pronto</span>'
+  };
+  PAGES = {}; ASSETS = {};
+  for (const route of Object.keys(PAGE_LIST)) {
+    const [file, title, desc] = PAGE_LIST[route];
+    try { PAGES[route] = Buffer.from(fill(LAYOUT(title, desc, fs.readFileSync(path.join(SITE_DIR, file), "utf8")), raw)); }
+    catch (e) { console.warn("Falta web/site/" + file); }
+  }
+  for (const f of ["site.css", "site.js"]) {
+    try { ASSETS["/" + f] = [fs.readFileSync(path.join(SITE_DIR, f)), f.endsWith(".css") ? "text/css; charset=utf-8" : "application/javascript; charset=utf-8"]; }
+    catch (e) { console.warn("Falta web/site/" + f); }
+  }
+}
+function serveSite(req, res, url, ip) {
+  const u = url.length > 1 ? url.replace(/\/+$/, "") : url;
+  if (PAGES[u]) {
+    res.writeHead(200, Object.assign({ "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": SITE_CSP, "Cache-Control": "no-cache" }, SEC));
+    return res.end(PAGES[u]);
+  }
+  if (ASSETS[u]) {
+    res.writeHead(200, Object.assign({ "Content-Type": ASSETS[u][1], "Cache-Control": "public, max-age=3600" }, SEC));
+    return res.end(ASSETS[u][0]);
+  }
+  if (u === "/ParcePay.apk" && apk) {
+    if (rate("apk:" + ip, 20, 60000)) { res.writeHead(429, SEC); return res.end(); }
+    res.writeHead(200, Object.assign({ "Content-Type": "application/vnd.android.package-archive", "Content-Disposition": 'attachment; filename="ParcePay.apk"',
+      "Content-Length": apk.size, "Cache-Control": "no-cache" }, SEC));
+    return fs.createReadStream(APK_FILE).on("error", () => res.destroy()).pipe(res);
+  }
+  if (u === "/robots.txt") {
+    res.writeHead(200, Object.assign({ "Content-Type": "text/plain; charset=utf-8" }, SEC));
+    return res.end("User-agent: *\nAllow: /\nDisallow: /puntos\nDisallow: /api/\n");
+  }
+  if (u === "/.well-known/security.txt" && mailOk) {
+    res.writeHead(200, Object.assign({ "Content-Type": "text/plain; charset=utf-8" }, SEC));
+    return res.end("Contact: mailto:" + VARS.LEGAL_CORREO + "\nExpires: " + new Date(Date.now() + 365 * 864e5).toISOString() + "\nPreferred-Languages: es, en\n");
+  }
+  res.writeHead(404, SEC); res.end();
+}
+
 let WEB_HTML = null, CSP = "";
 function loadWeb() {
   try {
@@ -756,12 +896,13 @@ const server = http.createServer((req, res) => {
   const url = req.url.split("?")[0];
   if (req.method === "GET") {
     if (url === "/health") { res.writeHead(200, Object.assign({ "Content-Type": "text/plain" }, SEC)); return res.end("ok"); }
-    if (url === "/" || url === "/index.html") {
+    // El portal de los puntos de recarga ahora vive en /puntos (la pagina de inicio publica ocupa "/")
+    if (url === "/puntos" || url === "/puntos/") {
       if (!WEB_HTML) { res.writeHead(404); return res.end("Falta web/index.html"); }
       res.writeHead(200, Object.assign({ "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": CSP, "Cache-Control": "no-cache" }, SEC));
       return res.end(WEB_HTML);
     }
-    res.writeHead(404, SEC); return res.end();
+    return serveSite(req, res, url, ip);
   }
   if (req.method === "OPTIONS") { res.writeHead(204, SEC); return res.end(); }
   if (req.method !== "POST") return send(res, 404, { error: "No existe" });
@@ -792,6 +933,7 @@ setInterval(() => {
 }, 300000).unref();
 
 loadWeb();
+loadSite();
 init()
   .then(() => server.listen(PORT, HOST, () => console.log("ParcePay listo en el puerto " + PORT)))
   .catch(e => { console.error("No pude conectar con la base de datos:", e.message); process.exit(1); });

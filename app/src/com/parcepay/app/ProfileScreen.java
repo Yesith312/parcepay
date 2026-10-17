@@ -24,6 +24,24 @@ class ProfileScreen extends Screen {
         p.addView(row("C\u00e9dula", "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022", EditProfileScreen.CC));
         p.addView(row("Nombres y apellidos", full, EditProfileScreen.NAME));
         p.addView(row("Clave", "\u2022\u2022\u2022\u2022", EditProfileScreen.PIN));
+        TextView l1 = Ui.tv("T\u00e9rminos y Condiciones", 15, Theme.BLUE, true);
+        l1.setPadding(Ui.dp(4), Ui.dp(22), 0, Ui.dp(6));
+        l1.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { a.web("/terminos"); }
+        });
+        p.addView(l1);
+        TextView l2 = Ui.tv("Pol\u00edtica de Privacidad", 15, Theme.BLUE, true);
+        l2.setPadding(Ui.dp(4), Ui.dp(8), 0, Ui.dp(6));
+        l2.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { a.web("/privacidad"); }
+        });
+        p.addView(l2);
+        TextView del = Ui.tv("Eliminar mi cuenta", 15, Theme.RED, true);
+        del.setPadding(Ui.dp(4), Ui.dp(18), 0, Ui.dp(20));
+        del.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { a.go(new DeleteAccountScreen(a), false); }
+        });
+        p.addView(del);
         ScrollView sc = new ScrollView(a);
         sc.setFillViewport(true);
         sc.setBackgroundColor(Theme.WHITE);

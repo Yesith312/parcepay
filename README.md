@@ -36,3 +36,16 @@ PUNTOS DE RECARGA (cajeros con cuenta)
   escribe celular + codigo + efectivo recibido, verifica el nombre y confirma. El monto sale del cupo del punto.
 - Sacar plata: el cliente elige el monto en la app y recibe el codigo; el cajero lo verifica, entrega el efectivo y el
   monto entra a su cupo.
+
+SITIO PUBLICO Y LEGAL
+- "/" = pagina de inicio publica; /terminos, /privacidad y /eliminar-cuenta = textos legales (carpeta server/web/site).
+- El portal de los puntos de recarga ahora esta en /puntos.
+- Render > Environment (datos del responsable que salen en los textos legales):
+    LEGAL_NOMBRE, LEGAL_ID (CC o NIT), LEGAL_CIUDAD, LEGAL_CORREO y, opcional, SOPORTE_WHATSAPP.
+  Si falta alguno, la pagina muestra [PENDIENTE: ...] resaltado en amarillo.
+- Publicar el APK en la pagina de inicio:
+    bash build.sh
+    cp /storage/emulated/0/Download/ParcePay.apk server/web/ParcePay.apk
+    bash deploy.sh
+  La pagina muestra el boton de descarga y la huella SHA-256 del archivo.
+- Si cambias los textos legales, sube LEGAL_VERSION en server/server.js y LEGAL_V en RegisterScreen.java (misma fecha).

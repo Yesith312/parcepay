@@ -39,6 +39,13 @@ public class MainActivity extends Activity {
         return new WelcomeScreen(this);
     }
 
+    /** Abre una pagina del sitio de ParcePay (terminos, privacidad...) en el navegador. */
+    void web(String ruta) {
+        try {
+            startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(Config.URL + ruta)));
+        } catch (Exception e) { }
+    }
+
     void go(Screen s, boolean back) {
         if (current != null) current.onLeave();
         current = s;
